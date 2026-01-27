@@ -1,0 +1,20 @@
+{
+    "task_path": [
+        "root"
+    ],
+    "parent_info": {
+        "id": "root",
+        "name": "Root Node",
+        "type": "Normal",
+        "status": "Running",
+        "information": "这是根节点"
+    },
+    "current_info": {
+        "id": "root",
+        "name": "Root Node",
+        "type": "Normal",
+        "status": "Running",
+        "information": "当前需要创建子节点"
+    },
+    "request": "请为当前节点创建3个子节点：一个循环节点（可以用于创建需要往复循环的任务），一个普通推进节点（在任务没有被分解成单次可以完美解决的任务时 可以用于分解任务），一个叶子节点（用于执行最原子 单次对话可以解决的任务），每个节点附带信息描述，"
+}

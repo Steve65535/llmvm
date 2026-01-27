@@ -1,0 +1,31 @@
+{
+    "actions": [
+        {
+            "action_type": "create_node",
+            "node": {
+                "id": "child_loop",
+                "name": "Loop Node",
+                "type": "Loop",
+                "information": "这个节点需要循环处理"
+            }
+        },
+        {
+            "action_type": "create_node",
+            "node": {
+                "id": "child_normal",
+                "name": "Normal Node",
+                "type": "Normal",
+                "information": "这个节点是普通推进节点"
+            }
+        },
+        {
+            "action_type": "create_node",
+            "node": {
+                "id": "child_leaf",
+                "name": "Leaf Node",
+                "type": "Leaf",
+                "information": "这个节点是叶子节点，将被执行"
+            }
+        }
+    ]
+}
