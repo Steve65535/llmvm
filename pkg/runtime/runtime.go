@@ -3,23 +3,33 @@ package runtime
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Steve65535/llmvm/pkg/cursor"
 	"github.com/Steve65535/llmvm/pkg/llm"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
+	"github.com/Steve65535/llmvm/pkg/vfs"
 )
 
 // Runtime 是图灵完备的 LLM 运行时引擎
 type Runtime struct {
-	engine llm.Engine
-	cursor *cursor.Cursor
+	engine      llm.Engine
+	cursor      *cursor.Cursor
+	initialReq  string
+	nodeCounter int                  // 全局节点计数器
+	history     []*tasknode.TaskNode // 已完成节点的历史记录（滑动窗口）
+	vfs         *vfs.VirtualFileSystem
 }
 
 // NewRuntime 创建新的运行时实例
 func NewRuntime(engine llm.Engine, root *tasknode.TaskNode) *Runtime {
+	vfsInstance := vfs.New(".") // 默认当前目录
 	return &Runtime{
-		engine: engine,
-		cursor: cursor.New(root),
+		engine:      engine,
+		cursor:      cursor.New(root),
+		nodeCounter: 0,
+		history:     []*tasknode.TaskNode{},
+		vfs:         vfsInstance,
 	}
 }
 
@@ -68,6 +78,12 @@ func (r *Runtime) Execute(initialRequest string) error {
 			prompt, err := r.buildPrompt(current, initialRequest, lastErr)
 			if err != nil {
 				return fmt.Errorf("failed to build prompt: %w", err)
+			}
+
+			// 确保当前节点有 Index
+			if current.Index == -1 {
+				r.nodeCounter++
+				current.Index = r.nodeCounter
 			}
 
 			// 输出 prompt 用于调试
@@ -192,6 +208,10 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryE
 
 	// 收集从根到当前的 Scoped Variables
 	scopedVariables := r.collectScopedVariables(current)
+	varsStr := formatVariables(scopedVariables)
+
+	// Global Attention (History Sliding Window)
+	historyStr := r.formatHistory()
 
 	// 转换为 JSON（用于结构化数据展示）
 	jsonData, err := json.MarshalIndent(req, "", "    ")
@@ -222,6 +242,7 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryE
 - Name: %s
 - Type: %s
 - Status: %s
+- Index: %d
 - WetherTraveled: %v
 - WetherFinished: %v
 - Information: %s
@@ -236,6 +257,9 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryE
 %s
 
 **Loop Context**:
+%s
+
+## Global Attention (Historical Context)
 %s
 
 ## Structured Request Data
@@ -254,23 +278,26 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryE
 ## Your Task
 
 Based on the above context, determine what actions to take. Consider:
-1. If the current node is a Leaf node, you should mark it as complete after processing
-2. If the current node needs decomposition, create appropriate child nodes
-3. If the current node is a Loop node, ensure all children are created before marking complete
-4. Node types:
+1. If the current node is a Leaf node, you should mark it as complete after processing.
+2. IMPORTANT: A Leaf node is defined by its semantic complexity. It should be small enough so that its context and result fit perfectly within a Large Language Model's optimal context window. If a task is too large, decompose it further.
+3. If the current node needs decomposition, create appropriate child nodes.
+4. If the current node is a Loop node, ensure all children are created before marking complete.
+5. You can execute system commands using 'execute_command' to interact with the file system.
+6. Node types:
    - Normal: For task decomposition
    - Loop: For iterative/cyclic tasks
-   - Leaf: For atomic tasks that can be completed in one step
+   - Leaf: For atomic tasks that fit in context
 
 Please respond with valid JSON in the required format.`,
 		formatPath(taskPath),
-		currentInfo.ID, currentInfo.Name, currentInfo.Type, currentInfo.Status,
-		current.WetherTraveled, current.WetherFinished, currentInfo.Information,
+		current.ID, current.Name, nodeTypeStr(current.Type), nodeStatusStr(current.Status), current.Index,
+		current.WetherTraveled, current.WetherFinished, strings.Join(current.Information, "\n"),
 		parentInfo.ID, parentInfo.Name, parentInfo.Type, parentInfo.Status,
 		childrenInfo,
 		loopInfo,
+		historyStr,
 		string(jsonData),
-		formatVariables(scopedVariables),
+		varsStr,
 		errorContext,
 		request)
 
@@ -410,23 +437,151 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		return nil
 	case "mark_complete":
 		// 标记当前节点为完成
-		if r.cursor.Current != nil {
-			r.cursor.Current.MarkFinished()
+		parent.MarkFinished()
+		if action.Result != "" {
+			parent.Result = action.Result
 		}
+		// 将已完成节点加入历史窗口
+		r.addToHistory(parent)
 		return nil
 	case "update_variables":
 		// 更新当前节点的变量
-		if r.cursor.Current != nil {
-			if r.cursor.Current.Variables == nil {
-				r.cursor.Current.Variables = make(map[string]interface{})
+		if action.Variables != nil {
+			if parent.Variables == nil {
+				parent.Variables = make(map[string]interface{})
 			}
 			for k, v := range action.Variables {
-				r.cursor.Current.Variables[k] = v
+				parent.Variables[k] = v
 			}
 		}
+		if action.Result != "" {
+			parent.Result = action.Result
+		}
+		return nil
+	case "execute_command":
+		fmt.Printf("💻 Executing command: %s\n", action.Command)
+		result, err := r.handleCLI(action.Command)
+		if err != nil {
+			return fmt.Errorf("command execution failed: %w", err)
+		}
+		fmt.Printf("📝 Command result: %s\n", result)
+		// 将结果存回节点变量
+		if parent.Variables == nil {
+			parent.Variables = make(map[string]interface{})
+		}
+		parent.Variables["last_command_result"] = result
 		return nil
 	default:
 		return fmt.Errorf("unknown action type: %s", action.ActionType)
+	}
+}
+
+// addToHistory 维护一个滑动窗口的历史记录
+func (r *Runtime) addToHistory(node *tasknode.TaskNode) {
+	r.history = append(r.history, node)
+	// 保持窗口大小，例如最近 10 个节点
+	if len(r.history) > 10 {
+		r.history = r.history[1:]
+	}
+}
+
+func (r *Runtime) formatHistory() string {
+	if len(r.history) == 0 {
+		return "No historical context available."
+	}
+	var sb strings.Builder
+	sb.WriteString("Recent completed nodes (Sliding Window):\n")
+	for _, n := range r.history {
+		sb.WriteString(fmt.Sprintf("- [%d] %s: %s\n", n.Index, n.Name, n.Result))
+	}
+	return sb.String()
+}
+
+func (r *Runtime) handleCLI(command string) (string, error) {
+	// 简单的空格分割
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty command")
+	}
+
+	cmd := parts[0]
+	// 过滤掉常用参数，只保留真正的路径参数（这是一个简单的启发式处理）
+	var args []string
+	for _, p := range parts[1:] {
+		if !strings.HasPrefix(p, "-") {
+			args = append(args, p)
+		}
+	}
+
+	switch cmd {
+	case "ls":
+		dir := "."
+		if len(args) > 0 {
+			dir = args[0]
+		}
+		files, err := r.vfs.List(dir)
+		if err != nil {
+			return "", err
+		}
+		return strings.Join(files, ", "), nil
+	case "cat":
+		if len(args) == 0 {
+			return "", fmt.Errorf("cat requires a file path")
+		}
+		content, err := r.vfs.Read(args[0])
+		if err != nil {
+			return "", err
+		}
+		return string(content), nil
+	case "write":
+		// write 通常格式为: write filename content...
+		// 这里的解析需要更细致
+		if len(parts) < 3 {
+			return "", fmt.Errorf("write requires a file path and content")
+		}
+		path := parts[1]
+		// 重新组合内容，避开前两个单词
+		content := strings.Join(parts[2:], " ")
+		err := r.vfs.Write(path, []byte(content))
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Successfully wrote to %s", path), nil
+	case "rm":
+		if len(args) == 0 {
+			return "", fmt.Errorf("rm requires a file path")
+		}
+		err := r.vfs.Delete(args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Successfully deleted %s", args[0]), nil
+	default:
+		return "", fmt.Errorf("unsupported command: %s (only ls, cat, write, rm are supported)", cmd)
+	}
+}
+
+func nodeTypeStr(t tasknode.TaskType) string {
+	switch t {
+	case tasknode.Loop:
+		return "Loop"
+	case tasknode.Leaf:
+		return "Leaf"
+	default:
+		return "Normal"
+	}
+}
+
+func nodeStatusStr(s tasknode.TaskStatus) string {
+	switch s {
+	case tasknode.Running:
+		return "Running"
+	case tasknode.Completed:
+		return "Completed"
+	case tasknode.Failed:
+		return "Failed"
+	default:
+		return "Pending"
 	}
 }
 

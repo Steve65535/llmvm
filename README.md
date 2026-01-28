@@ -10,6 +10,10 @@
 
 *   **Stateless Architecture**: Solves the "Context Window Explosion" problem by never feeding the entire conversation history to the model. At each step, the LLM receives only a precise snapshot of the current state.
 
+*   **Global Attention Perception (v2)**: A sliding window of recently completed nodes across the entire tree, allowing the model to "pick" information from distantly finished tasks.
+
+*   **Physical File Operations (v2)**: Built-in `execute_command` action with a real VFS, supporting `ls`, `cat`, `write`, and `rm` on the host system.
+
 *   **Scoped Node Variables (Distributed Memory)**:
     *   **Temporary State**: Each node can hold private variables that are inherited by descendants.
     *   **DFS Lifecycle**: Variables are naturally "popped" from the context when the execution moves out of a node's subtree.

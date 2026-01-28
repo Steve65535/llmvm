@@ -36,6 +36,8 @@ type TaskNode struct {
 	WetherTraveled bool // 是否已遍历过
 	WetherFinished bool // 是否已完成（主要用于 Loop 节点）
 	Variables      map[string]interface{}
+	Index          int    // 节点全局索引
+	Result         string // 节点执行结果摘要
 	mutex          sync.Mutex
 }
 
@@ -52,6 +54,8 @@ func NewTaskNode(id, name string, typ TaskType, info []string) *TaskNode {
 		WetherTraveled: false,
 		WetherFinished: false,
 		Variables:      make(map[string]interface{}),
+		Index:          -1, // 默认为 -1，由 Runtime 分配
+		Result:         "",
 	}
 }
 

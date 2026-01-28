@@ -86,48 +86,55 @@ The system uses depth-first search:
 - For **Loop nodes**: Check if all children are finished. If finished, mark the loop as finished and pop from the loop stack.
 - For **Leaf nodes**: Execute the task and immediately return to parent after completion.
 
-## Node Variables (Scoped & Temporary)
+## Node Variables & Global Attention
 
-Nodes can hold **Variables**. These variables serve as temporary state/memory:
-- **Scoped**: A node's variables are visible to itself and all its descendants. 
-- **Lifecycle**: When the system moves out of a node's subtree (pops it), its variables are no longer in scope.
-- **Usage**: Use variables to store calculation results, temporary flags, or any state that needs to persist across subtasks.
+1. **Node Variables**: Nodes can hold **Variables**. These are scoped to the current DFS path (you see all ancestor variables). When moving out of a subtree, those variables are "popped".
+2. **Global Attention (Historical Context)**: You have access to a sliding window of recently completed nodes across the entire tree. Each record includes a node's Index and Result. Use this to pick relevant information from finished tasks.
 
 ## Your Task
 
-Based on the current node state, request, and **Scoped Variables**, you need to:
-1. **Analyze** the current situation (node type, status, children state, variables)
-2. **Decide** what actions to take:
-   - Create child nodes (if task needs decomposition)
-   - Mark current node as complete (if task is done)
-   - Update variables (if you need to store temporary state in the current node)
-3. **Respond** in the required JSON format
+Based on the current node state, request, Scoped Variables, and Global Attention, you need to:
+1. **Analyze** the current situation.
+2. **Leaf Node Definition**: A Leaf Node is a task small enough that its context and results fit perfectly within your optimal context window. If a task is too large, decompose it.
+3. **Decide** what actions to take:
+   - create_node: Break down task.
+   - mark_complete: Finish CURRENT node. Provide a result string to summarize the outcome for Global Attention.
+   - update_variables: Store temporary state.
+   - execute_command: Run system commands (ls, cat, write, rm) to interact with the host.
+4. **Respond** in JSON format.
 
 ## Response Format
 
-You MUST respond with valid JSON in this format:
+Respond with valid JSON:
 {
   "actions": [
     {
-      "action_type": "create_node" | "mark_complete" | "update_variables",
+      "action_type": "create_node",
       "node": {
-        "id": "unique_node_id",
+        "id": "node_id",
         "name": "Node Name",
-        "type": "Normal" | "Loop" | "Leaf",
-        "information": "Description of what this node does",
-        "variables": {"key": "value"} // Optional: set initial variables for new node
-      },
-      "variables": {"key": "value"} // Optional: update variables of current node (use with update_variables)
+        "type": "Normal|Loop|Leaf",
+        "information": "Description",
+        "variables": {"key": "value"}
+      }
+    },
+    {
+      "action_type": "mark_complete",
+      "result": "Detailed result of the task"
+    },
+    {
+      "action_type": "execute_command",
+      "command": "ls ."
     }
   ]
 }
 
 ## Important Notes
 
-- Each conversation is STATELESS - you only see the current node context, not history
-- For "create_node" actions, you MUST provide a valid node with id, name, type, and information
-- For "mark_complete" actions, the node field can be empty
-- Think step by step: What is the current node trying to accomplish? Does it need decomposition? Is it ready to complete?`
+- Actions are executed sequentially. 
+- Results of execute_command will appear in your variables as last_command_result in the NEXT step.
+- Think step by step. Use the global context to find information from previously completed branches.
+`
 
 	reqBody := ChatRequest{
 		Model: e.Model,
