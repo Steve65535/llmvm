@@ -1,8 +1,11 @@
 package runtime
 
 import (
+	// Added for os/exec output capture
 	"encoding/json"
-	"fmt"
+	"fmt"     // Added as per instruction
+	"os"      // Added as per instruction
+	"os/exec" // Added as per instruction
 	"strings"
 
 	"github.com/Steve65535/llmvm/pkg/cursor"
@@ -401,18 +404,14 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 
 ## Your Task
 
-Based on the above context, determine what actions to take. Consider:
-1. If the current node is a Leaf node, you should mark it as complete after processing.
-2. IMPORTANT: A Leaf node is defined by its semantic complexity. It should be small enough so that its context and result fit perfectly within a Large Language Model's optimal context window. If a task is too large, decompose it further.
-3. If the current node needs decomposition, create appropriate child nodes.
-4. If the current node is a Loop node, ensure all children are created before marking complete.
-5. You can execute system commands using 'execute_command' to interact with the file system.
-6. Node types:
-   - Normal: For task decomposition
-   - Loop: For iterative/cyclic tasks
-   - Leaf: For atomic tasks that fit in context
+Please respond with valid JSON in the required format.
 
-Please respond with valid JSON in the required format.`,
+## Execution Requirements (STRICT):
+1. **Physical Persistence check**: If you see a file mentioned in a previous node's 'Result', **DO NOT** assume it exists physically. You MUST use 'ls' to verify its existence before attempting to 'cat' it.
+2. **Persistence**: To save results for future steps beyond semantic memory, you **MUST** use 'execute_command' with 'write'.
+3. **Decomposition**: If the current node is a Leaf node, process it now. If it requires multiple steps or complex logic, you SHOULD create child nodes first.
+4. **Tool Use**: Use 'pwd' to see current directory (always /). Use 'ls' to explore.
+`,
 		formatPath(taskPath),
 		current.ID, current.Name, nodeTypeStr(current.Type), nodeStatusStr(current.Status), current.Index,
 		current.WetherTraveled, current.WetherFinished, strings.Join(current.Information, "\n"),
@@ -704,67 +703,41 @@ func (r *Runtime) formatHistory() string {
 }
 
 func (r *Runtime) handleCLI(command string) (string, error) {
-	// 简单的空格分割
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
+	if command == "" {
 		return "", fmt.Errorf("empty command")
 	}
 
-	cmd := parts[0]
-	// 过滤掉常用参数，只保留真正的路径参数（这是一个简单的启发式处理）
-	var args []string
-	for _, p := range parts[1:] {
-		if !strings.HasPrefix(p, "-") {
-			args = append(args, p)
+	// Use sh -c to allow piping, redirection, and other shell features
+	// On Windows, this would be cmd /c or powershell -c
+	cmd := exec.Command("sh", "-c", command)
+
+	// Set work dir to current dir if possible
+	dir, _ := os.Getwd()
+	cmd.Dir = dir
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	combined := stdout.String()
+	if stderr.Len() > 0 {
+		if combined != "" {
+			combined += "\n"
 		}
+		combined += "STDERR: " + stderr.String()
 	}
 
-	switch cmd {
-	case "ls":
-		dir := "."
-		if len(args) > 0 {
-			dir = args[0]
-		}
-		files, err := r.vfs.List(dir)
-		if err != nil {
-			return "", err
-		}
-		return strings.Join(files, ", "), nil
-	case "cat":
-		if len(args) == 0 {
-			return "", fmt.Errorf("cat requires a file path")
-		}
-		content, err := r.vfs.Read(args[0])
-		if err != nil {
-			return "", err
-		}
-		return string(content), nil
-	case "write":
-		// write 通常格式为: write filename content...
-		// 这里的解析需要更细致
-		if len(parts) < 3 {
-			return "", fmt.Errorf("write requires a file path and content")
-		}
-		path := parts[1]
-		// 重新组合内容，避开前两个单词
-		content := strings.Join(parts[2:], " ")
-		err := r.vfs.Write(path, []byte(content))
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Successfully wrote to %s", path), nil
-	case "rm":
-		if len(args) == 0 {
-			return "", fmt.Errorf("rm requires a file path")
-		}
-		err := r.vfs.Delete(args[0])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Successfully deleted %s", args[0]), nil
-	default:
-		return "", fmt.Errorf("unsupported command: %s (only ls, cat, write, rm are supported)", cmd)
+	if err != nil {
+		return combined, fmt.Errorf("command execution failed: %w (output: %s)", err, combined)
 	}
+
+	if combined == "" {
+		return "Command executed successfully (no output).", nil
+	}
+
+	return combined, nil
 }
 
 func nodeTypeStr(t tasknode.TaskType) string {
