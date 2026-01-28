@@ -6,12 +6,14 @@ import (
 
 // Cursor 是语法树的读写头，用于深度优先遍历
 type Cursor struct {
+	Root      *tasknode.TaskNode
 	Current   *tasknode.TaskNode
 	LoopStack []*tasknode.TaskNode // Loop 节点的栈，用于管理循环状态
 }
 
 func New(root *tasknode.TaskNode) *Cursor {
 	return &Cursor{
+		Root:      root,
 		Current:   root,
 		LoopStack: []*tasknode.TaskNode{},
 	}
@@ -93,4 +95,9 @@ func (c *Cursor) GetPath() []string {
 		node = node.Parent
 	}
 	return path
+}
+
+// GetRoot 返回执行树的根节点
+func (c *Cursor) GetRoot() *tasknode.TaskNode {
+	return c.Root
 }

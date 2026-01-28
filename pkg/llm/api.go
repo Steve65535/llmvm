@@ -89,7 +89,7 @@ The system uses depth-first search:
 ## Node Variables & Global Attention
 
 1. **Node Variables**: Nodes can hold **Variables**. These are scoped to the current DFS path (you see all ancestor variables). When moving out of a subtree, those variables are "popped".
-2. **Global Attention (Historical Context)**: You have access to a sliding window of recently completed nodes across the entire tree. Each record includes a node's Index and Result. Use this to pick relevant information from finished tasks.
+2. **Global Attention (Historical Context)**: You have access to a summary of ALL completed nodes across the entire tree. Each record includes a node's Index, Name, and Result. Use this to pick relevant information from any previously finished branch.
 
 ## Your Task
 

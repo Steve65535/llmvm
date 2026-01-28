@@ -16,8 +16,7 @@ type Runtime struct {
 	engine      llm.Engine
 	cursor      *cursor.Cursor
 	initialReq  string
-	nodeCounter int                  // 全局节点计数器
-	history     []*tasknode.TaskNode // 已完成节点的历史记录（滑动窗口）
+	nodeCounter int // 全局节点计数器
 	vfs         *vfs.VirtualFileSystem
 }
 
@@ -28,7 +27,6 @@ func NewRuntime(engine llm.Engine, root *tasknode.TaskNode) *Runtime {
 		engine:      engine,
 		cursor:      cursor.New(root),
 		nodeCounter: 0,
-		history:     []*tasknode.TaskNode{},
 		vfs:         vfsInstance,
 	}
 }
@@ -441,8 +439,6 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		if action.Result != "" {
 			parent.Result = action.Result
 		}
-		// 将已完成节点加入历史窗口
-		r.addToHistory(parent)
 		return nil
 	case "update_variables":
 		// 更新当前节点的变量
@@ -476,23 +472,71 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 	}
 }
 
-// addToHistory 维护一个滑动窗口的历史记录
-func (r *Runtime) addToHistory(node *tasknode.TaskNode) {
-	r.history = append(r.history, node)
-	// 保持窗口大小，例如最近 10 个节点
-	if len(r.history) > 10 {
-		r.history = r.history[1:]
+// NodeResult 辅助结构用于排序
+type NodeResult struct {
+	Index  int
+	Name   string
+	Result string
+}
+
+// collectGlobalAttention 递归扫描整棵树，提取所有产出 Result 的节点信息
+func (r *Runtime) collectGlobalAttention(node *tasknode.TaskNode) []NodeResult {
+	var results []NodeResult
+	if node.Result != "" {
+		results = append(results, NodeResult{
+			Index:  node.Index,
+			Name:   node.Name,
+			Result: node.Result,
+		})
 	}
+	for _, child := range node.Children {
+		results = append(results, r.collectGlobalAttention(child)...)
+	}
+	return results
 }
 
 func (r *Runtime) formatHistory() string {
-	if len(r.history) == 0 {
+	// 从根节点开始全量扫描
+	root := r.cursor.GetRoot()
+	if root == nil {
 		return "No historical context available."
 	}
+
+	allResults := r.collectGlobalAttention(root)
+	if len(allResults) == 0 {
+		return "No historical context available yet."
+	}
+
+	// 1. 按 Index 倒序排序（最新的在前面）
+	for i := 0; i < len(allResults); i++ {
+		for j := i + 1; j < len(allResults); j++ {
+			if allResults[i].Index < allResults[j].Index {
+				allResults[i], allResults[j] = allResults[j], allResults[i]
+			}
+		}
+	}
+
+	// 2. 限制窗口大小（例如显示最近 10 条结果）
+	const maxWindow = 10
+	limit := len(allResults)
+	if limit > maxWindow {
+		limit = maxWindow
+	}
+
+	// 3. 截取最近的结果，并按 Index 正序排回来显示，方便模型阅读
+	window := allResults[:limit]
+	for i := 0; i < len(window); i++ {
+		for j := i + 1; j < len(window); j++ {
+			if window[i].Index > window[j].Index {
+				window[i], window[j] = window[j], window[i]
+			}
+		}
+	}
+
 	var sb strings.Builder
-	sb.WriteString("Recent completed nodes (Sliding Window):\n")
-	for _, n := range r.history {
-		sb.WriteString(fmt.Sprintf("- [%d] %s: %s\n", n.Index, n.Name, n.Result))
+	sb.WriteString(fmt.Sprintf("Global Attention (Latest %d results picked from across the tree):\n", limit))
+	for _, res := range window {
+		sb.WriteString(fmt.Sprintf("- [%d] %s: %s\n", res.Index, res.Name, res.Result))
 	}
 	return sb.String()
 }
