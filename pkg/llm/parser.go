@@ -10,20 +10,22 @@ import (
 
 // NodeDTO 对应 response.json 中的 node 结构
 type NodeDTO struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Type        string `json:"type"` // "Normal", "Loop", "Leaf"
-	Information string `json:"information"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Type        string                 `json:"type"` // "Normal", "Loop", "Leaf"
+	Information string                 `json:"information"`
+	Variables   map[string]interface{} `json:"variables,omitempty"`
 }
 
 // NodeState 对应 request.json 中的 parent_info/current_info
 // 比 NodeDTO 多了 Status 字段
 type NodeState struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Status      string `json:"status"`
-	Information string `json:"information"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Type        string                 `json:"type"`
+	Status      string                 `json:"status"`
+	Information string                 `json:"information"`
+	Variables   map[string]interface{} `json:"variables,omitempty"`
 }
 
 // Request 对应 request.json 的根结构
@@ -37,8 +39,9 @@ type Request struct {
 
 // Action 对应 response.json 中的 action 结构
 type Action struct {
-	ActionType string  `json:"action_type"`
-	Node       NodeDTO `json:"node"`
+	ActionType string                 `json:"action_type"`
+	Node       NodeDTO                `json:"node"`
+	Variables  map[string]interface{} `json:"variables,omitempty"` // For updating current node variables
 }
 
 // Response 对应 response.json 的根结构
@@ -116,5 +119,9 @@ func (n *NodeDTO) ToTaskNode() *tasknode.TaskNode {
 		infos = append(infos, n.Information)
 	}
 
-	return tasknode.NewTaskNode(n.ID, n.Name, typ, infos)
+	node := tasknode.NewTaskNode(n.ID, n.Name, typ, infos)
+	if n.Variables != nil {
+		node.Variables = n.Variables
+	}
+	return node
 }

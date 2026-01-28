@@ -35,6 +35,7 @@ type TaskNode struct {
 	UpdatedAt      time.Time
 	WetherTraveled bool // 是否已遍历过
 	WetherFinished bool // 是否已完成（主要用于 Loop 节点）
+	Variables      map[string]interface{}
 	mutex          sync.Mutex
 }
 
@@ -50,6 +51,7 @@ func NewTaskNode(id, name string, typ TaskType, info []string) *TaskNode {
 		UpdatedAt:      time.Now(),
 		WetherTraveled: false,
 		WetherFinished: false,
+		Variables:      make(map[string]interface{}),
 	}
 }
 

@@ -86,13 +86,21 @@ The system uses depth-first search:
 - For **Loop nodes**: Check if all children are finished. If finished, mark the loop as finished and pop from the loop stack.
 - For **Leaf nodes**: Execute the task and immediately return to parent after completion.
 
+## Node Variables (Scoped & Temporary)
+
+Nodes can hold **Variables**. These variables serve as temporary state/memory:
+- **Scoped**: A node's variables are visible to itself and all its descendants. 
+- **Lifecycle**: When the system moves out of a node's subtree (pops it), its variables are no longer in scope.
+- **Usage**: Use variables to store calculation results, temporary flags, or any state that needs to persist across subtasks.
+
 ## Your Task
 
-Based on the current node state and request, you need to:
-1. **Analyze** the current situation (node type, status, children state)
+Based on the current node state, request, and **Scoped Variables**, you need to:
+1. **Analyze** the current situation (node type, status, children state, variables)
 2. **Decide** what actions to take:
    - Create child nodes (if task needs decomposition)
    - Mark current node as complete (if task is done)
+   - Update variables (if you need to store temporary state in the current node)
 3. **Respond** in the required JSON format
 
 ## Response Format
@@ -101,13 +109,15 @@ You MUST respond with valid JSON in this format:
 {
   "actions": [
     {
-      "action_type": "create_node" | "mark_complete",
+      "action_type": "create_node" | "mark_complete" | "update_variables",
       "node": {
         "id": "unique_node_id",
         "name": "Node Name",
         "type": "Normal" | "Loop" | "Leaf",
-        "information": "Description of what this node does"
-      }
+        "information": "Description of what this node does",
+        "variables": {"key": "value"} // Optional: set initial variables for new node
+      },
+      "variables": {"key": "value"} // Optional: update variables of current node (use with update_variables)
     }
   ]
 }

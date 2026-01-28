@@ -55,47 +55,73 @@ func (r *Runtime) Execute(initialRequest string) error {
 			iteration, current.ID, current.Name, current.Type, current.WetherTraveled, current.WetherFinished)
 
 		// 1. 构建 stateless prompt（不包含历史上下文）
-		prompt, err := r.buildPrompt(current, initialRequest)
-		if err != nil {
-			return fmt.Errorf("failed to build prompt: %w", err)
-		}
+		var response *llm.Response
+		maxRetries := 3
+		var lastErr error
+		retryCount := 0
 
-		// 输出 prompt 用于调试
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Println("📤 PROMPT TO LLM:")
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Println(prompt)
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Println()
-
-		// 2. 与 LLM 对话（stateless）
-		fmt.Printf("  🤖 Calling LLM...\n")
-		output, err := r.engine.Call(prompt)
-		if err != nil {
-			return fmt.Errorf("LLM call failed: %w", err)
-		}
-
-		// 输出原始响应
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Println("📥 RAW RESPONSE FROM LLM:")
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Println(output.Response)
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Println()
-
-		// 3. 解析 LLM 响应
-		response, err := llm.ParseResponse(output.Response)
-		if err != nil {
-			return fmt.Errorf("failed to parse response: %w", err)
-		}
-
-		fmt.Printf("  ✅ Parsed successfully: %d action(s)\n", len(response.Actions))
-
-		// 4. 执行动作：创建节点或标记完成
-		for _, action := range response.Actions {
-			if err := r.executeAction(action, current); err != nil {
-				return fmt.Errorf("failed to execute action: %w", err)
+		for retryCount <= maxRetries {
+			if retryCount > 0 {
+				fmt.Printf("  ⚠️ Retry %d/%d due to error: %v\n", retryCount, maxRetries, lastErr)
 			}
+
+			prompt, err := r.buildPrompt(current, initialRequest, lastErr)
+			if err != nil {
+				return fmt.Errorf("failed to build prompt: %w", err)
+			}
+
+			// 输出 prompt 用于调试
+			if retryCount == 0 {
+				fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+				fmt.Println("📤 PROMPT TO LLM:")
+				fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+				fmt.Println(prompt)
+				fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+				fmt.Println()
+			}
+
+			// 2. 与 LLM 对话（stateless）
+			fmt.Printf("  🤖 Calling LLM (Attempt %d)...\n", retryCount+1)
+			output, err := r.engine.Call(prompt)
+			if err != nil {
+				lastErr = fmt.Errorf("LLM call failed: %w", err)
+				retryCount++
+				continue
+			}
+
+			// 3. 解析 LLM 响应
+			response, lastErr = llm.ParseResponse(output.Response)
+			if lastErr != nil {
+				retryCount++
+				continue
+			}
+
+			// 4. 执行动作：创建节点或标记完成
+			actionErr := false
+			for _, action := range response.Actions {
+				if err := r.executeAction(action, current); err != nil {
+					lastErr = fmt.Errorf("failed to execute action: %w", err)
+					actionErr = true
+					break
+				}
+			}
+
+			if actionErr {
+				retryCount++
+				continue
+			}
+
+			// 如果走到这里，解析和执行都成功了
+			fmt.Printf("  ✅ Step processed successfully: %d action(s)\n", len(response.Actions))
+			break
+		}
+
+		if retryCount > maxRetries {
+			return fmt.Errorf("maximum retries (%d) reached for node [%s]: %w", maxRetries, current.ID, lastErr)
+		}
+
+		// 打印成功执行的动作（可选，因为之前已经打印了部分信息）
+		for _, action := range response.Actions {
 			if action.ActionType == "create_node" {
 				fmt.Printf("    ➕ Created node: [%s] %s (Type: %s)\n",
 					action.Node.ID, action.Node.Name, action.Node.Type)
@@ -125,7 +151,7 @@ func (r *Runtime) Execute(initialRequest string) error {
 }
 
 // buildPrompt 构建 stateless prompt（不包含历史上下文）
-func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string) (string, error) {
+func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryError error) (string, error) {
 	// 构建任务路径
 	taskPath := r.cursor.GetPath()
 
@@ -164,10 +190,26 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string) (strin
 		Request:     request,
 	}
 
+	// 收集从根到当前的 Scoped Variables
+	scopedVariables := r.collectScopedVariables(current)
+
 	// 转换为 JSON（用于结构化数据展示）
 	jsonData, err := json.MarshalIndent(req, "", "    ")
 	if err != nil {
 		return "", err
+	}
+
+	// 如果有重试错误信息，添加到 prompt 中
+	errorContext := ""
+	if retryError != nil {
+		errorContext = fmt.Sprintf(`
+> [!IMPORTANT]
+> **Previous Attempt Failed**:
+> The previous response resulted in the following error:
+> %v
+>
+> Please fix the error and provide a valid JSON response.
+`, retryError)
 	}
 
 	// 构建完整的 prompt，包含上下文信息
@@ -200,6 +242,11 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string) (strin
 
 %s
 
+## Scoped Variables (Current Path Context)
+
+%s
+%s
+
 ## Request
 
 %s
@@ -223,6 +270,8 @@ Please respond with valid JSON in the required format.`,
 		childrenInfo,
 		loopInfo,
 		string(jsonData),
+		formatVariables(scopedVariables),
+		errorContext,
 		request)
 
 	return prompt, nil
@@ -320,7 +369,35 @@ func (r *Runtime) nodeToState(node *tasknode.TaskNode) llm.NodeState {
 		Type:        nodeType,
 		Status:      status,
 		Information: information,
+		Variables:   node.Variables,
 	}
+}
+
+// collectScopedVariables 收集从根节点到当前路径的所有变量（越靠近当前节点优先级越高）
+func (r *Runtime) collectScopedVariables(current *tasknode.TaskNode) map[string]interface{} {
+	vars := make(map[string]interface{})
+	path := []*tasknode.TaskNode{}
+	node := current
+	for node != nil {
+		path = append([]*tasknode.TaskNode{node}, path...)
+		node = node.Parent
+	}
+
+	for _, n := range path {
+		for k, v := range n.Variables {
+			vars[k] = v
+		}
+	}
+	return vars
+}
+
+// formatVariables 格式化变量为可读字符串
+func formatVariables(vars map[string]interface{}) string {
+	if len(vars) == 0 {
+		return "No scoped variables."
+	}
+	data, _ := json.MarshalIndent(vars, "", "  ")
+	return string(data)
 }
 
 // executeAction 执行 LLM 返回的动作
@@ -335,6 +412,17 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		// 标记当前节点为完成
 		if r.cursor.Current != nil {
 			r.cursor.Current.MarkFinished()
+		}
+		return nil
+	case "update_variables":
+		// 更新当前节点的变量
+		if r.cursor.Current != nil {
+			if r.cursor.Current.Variables == nil {
+				r.cursor.Current.Variables = make(map[string]interface{})
+			}
+			for k, v := range action.Variables {
+				r.cursor.Current.Variables[k] = v
+			}
 		}
 		return nil
 	default:
