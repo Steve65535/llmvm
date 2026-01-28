@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -151,11 +152,41 @@ You must respond with a single valid JSON object containing an array of 'actions
 		return nil, fmt.Errorf("API error: %s", chatResp.Error.Message)
 	}
 
-	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("no choices returned")
+	respContent := chatResp.Choices[0].Message.Content
+
+	// 记录日志 (Input & Output)
+	logLLMConversation(prompt, respContent)
+
+	return &Output{Response: respContent}, nil
+}
+
+// logLLMConversation 将对话记录到 test/llm_logs.txt
+func logLLMConversation(input, output string) {
+	logDir := "test"
+	logFile := filepath.Join(logDir, "llm_logs.txt")
+
+	// 确保目录存在
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		_ = os.MkdirAll(logDir, 0755)
 	}
 
-	return &Output{Response: chatResp.Choices[0].Message.Content}, nil
+	// 准备日志内容
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	separator := "================================================================================"
+	logEntry := fmt.Sprintf("%s\n[%s]\n\n[INPUT]\n%s\n\n[OUTPUT]\n%s\n%s\n\n",
+		separator, timestamp, input, output, separator)
+
+	// 以追加模式打开文件
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("⚠️ Failed to open log file: %v\n", err)
+		return
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(logEntry); err != nil {
+		fmt.Printf("⚠️ Failed to write to log file: %v\n", err)
+	}
 }
 
 // 异步调用

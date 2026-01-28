@@ -61,12 +61,20 @@ func (r *Runtime) Execute(initialRequest string) error {
 			break
 		}
 
-		// 📍 IMPROVEMENT(v10): Skip LLM call if already traveled
+		// 📍 IMPROVEMENT(v10/v11): Skip LLM call if already traveled
 		// Normal and Loop nodes only need LLM calls for their initial turn (to decompose/decide).
 		// Once traveled, they use decideNextStep to manage their children.
 		if current.WetherTraveled && current.Type != tasknode.Leaf {
-			// Special case: Loop nodes that have finished their children
-			// need decideNextStep to decide whether to loop again or move up.
+			// Special case: For Normal nodes, if all children are traveled, we move up.
+			// But first, we ensure it has a chance to decide its own Finished status if it has no children.
+			if current.Type == tasknode.Normal && current.AllChildrenTraveled() {
+				fmt.Printf("📍 Step %d: Normal node [%s] %s - All children traveled, moving up\n", iteration, current.ID, current.Name)
+				if err := r.decideNextStep(current); err != nil {
+					return fmt.Errorf("failed to decide next step: %w", err)
+				}
+				continue
+			}
+
 			fmt.Printf("📍 Step %d: Skipping LLM call for traveled node [%s] %s\n", iteration, current.ID, current.Name)
 			if err := r.decideNextStep(current); err != nil {
 				return fmt.Errorf("failed to decide next step: %w", err)
@@ -125,6 +133,9 @@ func (r *Runtime) Execute(initialRequest string) error {
 			actionErr := false
 			for _, action := range response.Actions {
 				if err := r.executeAction(action, current); err != nil {
+					if strings.Contains(err.Error(), "EMERGENCY_SHUTDOWN") {
+						return err
+					}
 					lastErr = fmt.Errorf("failed to execute action: %w", err)
 					actionErr = true
 					break
@@ -576,6 +587,8 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		}
 		parent.Variables["last_command_result"] = result
 		return nil
+	case "shutdown":
+		return fmt.Errorf("EMERGENCY_SHUTDOWN: %s", action.Result)
 	default:
 		return fmt.Errorf("unknown action type: %s", action.ActionType)
 	}
@@ -778,15 +791,19 @@ func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
 		}
 
 		// Case: Normal node
-		// Hierarchical AND: Only mark finished if all children are finished.
-		if allFinished || len(current.Children) == 0 {
-			current.MarkFinished()
+		// According to user instructions: "all traveled才是完成了" (All traveled means completed).
+		// Pop Criteria: Move up once all children are traveled.
+		if current.AllChildrenTraveled() || len(current.Children) == 0 {
+			// Hierarchical Finished: Only mark finished if all children are finished.
+			if allFinished || len(current.Children) == 0 {
+				if !current.WetherFinished {
+					current.MarkFinished()
+				}
+			}
+			r.cursor.MoveUp()
 		} else {
-			// If not all finished but all traveled, move up anyway?
-			// In a strict DFS, if children failed or are stuck, the parent might fail.
-			// Currently, we move up and let the system continue.
+			fmt.Printf("  ⚠️ Normal node [%s] has untraveled children, staying\n", current.ID)
 		}
-		r.cursor.MoveUp()
 		return nil
 	}
 
