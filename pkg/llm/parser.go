@@ -16,6 +16,7 @@ type NodeDTO struct {
 	Information string                 `json:"information"`
 	Variables   map[string]interface{} `json:"variables,omitempty"`
 	Index       int                    `json:"index,omitempty"`
+	IsImportant bool                   `json:"is_important,omitempty"`
 }
 
 // NodeState 对应 request.json 中的 parent_info/current_info
@@ -29,6 +30,7 @@ type NodeState struct {
 	Variables   map[string]interface{} `json:"variables,omitempty"`
 	Index       int                    `json:"index,omitempty"`
 	Result      string                 `json:"result,omitempty"`
+	IsImportant bool                   `json:"is_important,omitempty"`
 }
 
 // Request 对应 request.json 的根结构
@@ -42,11 +44,12 @@ type Request struct {
 
 // Action 对应 response.json 中的 action 结构
 type Action struct {
-	ActionType string                 `json:"action_type"`
-	Node       NodeDTO                `json:"node"`
-	Variables  map[string]interface{} `json:"variables,omitempty"` // For updating current node variables
-	Result     string                 `json:"result,omitempty"`    // For setting node result
-	Command    string                 `json:"command,omitempty"`   // For execute_command
+	ActionType  string                 `json:"action_type"`
+	Node        NodeDTO                `json:"node"`
+	Variables   map[string]interface{} `json:"variables,omitempty"` // For updating current node variables
+	Result      string                 `json:"result,omitempty"`    // For setting node result
+	Command     string                 `json:"command,omitempty"`   // For execute_command
+	IsImportant bool                   `json:"is_important,omitempty"`
 }
 
 // Response 对应 response.json 的根结构
@@ -131,5 +134,6 @@ func (n *NodeDTO) ToTaskNode() *tasknode.TaskNode {
 	if n.Index != 0 {
 		node.Index = n.Index
 	}
+	node.IsImportant = n.IsImportant
 	return node
 }

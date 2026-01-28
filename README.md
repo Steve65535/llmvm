@@ -10,7 +10,9 @@
 
 *   **Stateless Architecture**: Solves the "Context Window Explosion" problem by never feeding the entire conversation history to the model. At each step, the LLM receives only a precise snapshot of the current state.
 
-*   **Global Attention (v4)**: A ranked "full-tree scan" mechanism that prioritized recently completed node results from across the entire AST, providing a global "RAM" regardless of the current DFS path.
+*   **Two-Pass Global Attention (v6)**: A sophisticated "Brain-over-Bus" architecture.
+    *   **Selection Pass**: The LLM pre-scans a compact Tree Index to identify relevant nodes.
+    *   **Execution Pass**: Only selected node data is loaded into an **Ephemeral RAM** workspace, ensuring extreme context efficiency and cross-branch awareness without persistence.
 
 *   **Physical File Operations (v2)**: Built-in `execute_command` action with a real VFS, supporting `ls`, `cat`, `write`, and `rm` on the host system.
 

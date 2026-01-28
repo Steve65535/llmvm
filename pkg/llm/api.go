@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"time"
 )
 
 // OpenAI Compatible Structures
@@ -88,8 +89,10 @@ The system uses depth-first search:
 
 ## Node Variables & Global Attention
 
-1. **Node Variables**: Nodes can hold **Variables**. These are scoped to the current DFS path (you see all ancestor variables). When moving out of a subtree, those variables are "popped".
-2. **Global Attention (Historical Context)**: You have access to a summary of ALL completed nodes across the entire tree. Each record includes a node's Index, Name, and Result. Use this to pick relevant information from any previously finished branch.
+1. **Node Variables**: Nodes can hold **Variables**. These are scoped to the current DFS path (you see all ancestor variables). When moving out of a subtree, those variables are "popped" from immediate path visibility.
+2. **Global Workspace (RAM)**: This is a persistent memory for "Key Findings". It picks "Important" nodes from the entire tree.
+   - **How to Pin**: When using mark_complete or update_variables, set "is_important": true to "pin" that node's results and variables to the Global Workspace.
+   - **Perception**: You can see a summary of all pinned nodes (ID, Result, and Variables) across all branches. Use this to pass crucial data between independent branches.
 
 ## Your Task
 
@@ -155,7 +158,9 @@ Respond with valid JSON:
 		req.Header.Set(k, v)
 	}
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

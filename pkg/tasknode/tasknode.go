@@ -38,6 +38,7 @@ type TaskNode struct {
 	Variables      map[string]interface{}
 	Index          int    // 节点全局索引
 	Result         string // 节点执行结果摘要
+	IsImportant    bool   // 是否为重要节点（将被纳入全局 RAM）
 	mutex          sync.Mutex
 }
 
@@ -56,6 +57,7 @@ func NewTaskNode(id, name string, typ TaskType, info []string) *TaskNode {
 		Variables:      make(map[string]interface{}),
 		Index:          -1, // 默认为 -1，由 Runtime 分配
 		Result:         "",
+		IsImportant:    false,
 	}
 }
 

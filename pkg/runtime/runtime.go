@@ -62,7 +62,20 @@ func (r *Runtime) Execute(initialRequest string) error {
 		fmt.Printf("📍 Step %d: Processing node [%s] %s (Type: %v, Traveled: %v, Finished: %v)\n",
 			iteration, current.ID, current.Name, current.Type, current.WetherTraveled, current.WetherFinished)
 
-		// 1. 构建 stateless prompt（不包含历史上下文）
+		// --- PASS 1: Attention Selection ---
+		// 每次对话前的先验：挑选有用的关联节点
+		selectedNodeIDs := []string{}
+		// 只有在迭代次数大于 1（即已经产生了一些历史节点）时才需要扫索引
+		if iteration > 0 {
+			ids, err := r.selectAttentionNodes(current, initialRequest)
+			if err != nil {
+				fmt.Printf("  ⚠️ Attention selection failed (skipping): %v\n", err)
+			} else {
+				selectedNodeIDs = ids
+			}
+		}
+
+		// 2. 构建 stateless prompt（包含选中的 RAM 信息）
 		var response *llm.Response
 		maxRetries := 3
 		var lastErr error
@@ -73,7 +86,8 @@ func (r *Runtime) Execute(initialRequest string) error {
 				fmt.Printf("  ⚠️ Retry %d/%d due to error: %v\n", retryCount, maxRetries, lastErr)
 			}
 
-			prompt, err := r.buildPrompt(current, initialRequest, lastErr)
+			// 使用 PASS 1 选中的节点构建主 Prompt
+			prompt, err := r.buildPromptWithWorkspace(current, initialRequest, selectedNodeIDs, lastErr)
 			if err != nil {
 				return fmt.Errorf("failed to build prompt: %w", err)
 			}
@@ -166,6 +180,118 @@ func (r *Runtime) Execute(initialRequest string) error {
 
 // buildPrompt 构建 stateless prompt（不包含历史上下文）
 func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryError error) (string, error) {
+	return r.buildPromptInternal(current, request, nil, retryError)
+}
+
+// buildPromptWithWorkspace 是 buildPrompt 的包装，支持传入 selectedNodeIDs
+func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error) (string, error) {
+	return r.buildPromptInternal(current, request, selectedNodeIDs, retryError)
+}
+
+// selectAttentionNodes 发起第一次对话，让 LLM 挑选有用的节点
+func (r *Runtime) selectAttentionNodes(current *tasknode.TaskNode, request string) ([]string, error) {
+	root := r.cursor.GetRoot()
+	if root == nil {
+		return nil, nil
+	}
+
+	// 1. 生成精简的全树索引
+	treeIndex := r.getTreeIndex(root, 0)
+
+	// 2. 构建筛选 Prompt
+	selectorPrompt := fmt.Sprintf(`You are an Attention Selector for LLMVM.
+Your task is to scan the current state of the task tree and identify nodes whose Variables or Results are useful for the current step.
+
+## Task Tree Index (Compact)
+%s
+
+## Current Target Node
+- ID: %s
+- Name: %s
+- Goal: %s
+
+## Your Task
+Identify which nodes from the Tree Index contain information (variables/results) that might be needed to solve the current goal. 
+Return ONLY a comma-separated list of Node IDs. If none are useful, return "none".
+Example: "node_1, node_5, create_dir"`, treeIndex, current.ID, current.Name, request)
+
+	fmt.Printf("  🧠 Selecting relevant nodes from Global Tree...\n")
+	output, err := r.engine.Call(selectorPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	raw := strings.TrimSpace(output.Response)
+	if strings.ToLower(raw) == "none" || raw == "" {
+		return nil, nil
+	}
+
+	// 解析 ID 列表
+	ids := strings.Split(raw, ",")
+	for i, id := range ids {
+		ids[i] = strings.TrimSpace(id)
+	}
+	return ids, nil
+}
+
+// getTreeIndex 递归生成紧凑的树索引
+func (r *Runtime) getTreeIndex(node *tasknode.TaskNode, indent int) string {
+	line := fmt.Sprintf("%s- [%s] %s (Status: %s)\n", strings.Repeat("  ", indent), node.ID, node.Name, nodeStatusStr(node.Status))
+	for _, child := range node.Children {
+		line += r.getTreeIndex(child, indent+1)
+	}
+	return line
+}
+
+// formatGlobalWorkspace 根据选中的 ID 组合详细的 RAM 快照
+func (r *Runtime) formatGlobalWorkspace(nodeIDs []string) string {
+	if len(nodeIDs) == 0 {
+		return "No nodes selected for global workspace."
+	}
+
+	// 递归查找并提取节点信息
+	var sb strings.Builder
+	sb.WriteString("Useful information picked from selected nodes:\n")
+
+	root := r.cursor.GetRoot()
+	foundAny := false
+
+	for _, id := range nodeIDs {
+		node := r.findNodeByID(root, id)
+		if node != nil {
+			foundAny = true
+			sb.WriteString(fmt.Sprintf("- [%s] %s:\n", node.ID, node.Name))
+			if node.Result != "" {
+				sb.WriteString(fmt.Sprintf("  Result: %s\n", node.Result))
+			}
+			if len(node.Variables) > 0 {
+				varsJSON, _ := json.Marshal(node.Variables)
+				sb.WriteString(fmt.Sprintf("  Variables: %s\n", string(varsJSON)))
+			}
+		}
+	}
+
+	if !foundAny {
+		return "No historical context available yet (no matching nodes found)."
+	}
+	return sb.String()
+}
+
+// findNodeByID 递归查找节点
+func (r *Runtime) findNodeByID(root *tasknode.TaskNode, id string) *tasknode.TaskNode {
+	if root.ID == id {
+		return root
+	}
+	for _, child := range root.Children {
+		found := r.findNodeByID(child, id)
+		if found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error) (string, error) {
 	// 构建任务路径
 	taskPath := r.cursor.GetPath()
 
@@ -208,8 +334,8 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryE
 	scopedVariables := r.collectScopedVariables(current)
 	varsStr := formatVariables(scopedVariables)
 
-	// Global Attention (History Sliding Window)
-	historyStr := r.formatHistory()
+	// Global Workspace (Stateless, based on selection)
+	workspaceStr := r.formatGlobalWorkspace(selectedNodeIDs)
 
 	// 转换为 JSON（用于结构化数据展示）
 	jsonData, err := json.MarshalIndent(req, "", "    ")
@@ -230,7 +356,7 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryE
 `, retryError)
 	}
 
-	// 构建完整的 prompt，包含上下文信息
+	// 构建完整的 prompt
 	prompt := fmt.Sprintf(`## Current Context
 
 **Task Path**: %s
@@ -257,7 +383,7 @@ func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryE
 **Loop Context**:
 %s
 
-## Global Attention (Historical Context)
+## Global Workspace (Ephemeral RAM)
 %s
 
 ## Structured Request Data
@@ -293,7 +419,7 @@ Please respond with valid JSON in the required format.`,
 		parentInfo.ID, parentInfo.Name, parentInfo.Type, parentInfo.Status,
 		childrenInfo,
 		loopInfo,
-		historyStr,
+		workspaceStr,
 		string(jsonData),
 		varsStr,
 		errorContext,
@@ -395,6 +521,9 @@ func (r *Runtime) nodeToState(node *tasknode.TaskNode) llm.NodeState {
 		Status:      status,
 		Information: information,
 		Variables:   node.Variables,
+		Index:       node.Index,
+		Result:      node.Result,
+		IsImportant: node.IsImportant,
 	}
 }
 
@@ -439,6 +568,9 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		if action.Result != "" {
 			parent.Result = action.Result
 		}
+		if action.IsImportant {
+			parent.IsImportant = true
+		}
 		return nil
 	case "update_variables":
 		// 更新当前节点的变量
@@ -452,6 +584,9 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		}
 		if action.Result != "" {
 			parent.Result = action.Result
+		}
+		if action.IsImportant {
+			parent.IsImportant = true
 		}
 		return nil
 	case "execute_command":
@@ -474,19 +609,24 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 
 // NodeResult 辅助结构用于排序
 type NodeResult struct {
-	Index  int
-	Name   string
-	Result string
+	Index       int
+	Name        string
+	Result      string
+	Variables   map[string]interface{}
+	IsImportant bool
 }
 
-// collectGlobalAttention 递归扫描整棵树，提取所有产出 Result 的节点信息
+// collectGlobalAttention 递归扫描整棵树，提取所有“有用”的节点信息（重要的或有结果的）
 func (r *Runtime) collectGlobalAttention(node *tasknode.TaskNode) []NodeResult {
 	var results []NodeResult
-	if node.Result != "" {
+	// 挑选逻辑：显示被标记为 Important 的节点，或者至少有 Result 的节点
+	if node.IsImportant || node.Result != "" {
 		results = append(results, NodeResult{
-			Index:  node.Index,
-			Name:   node.Name,
-			Result: node.Result,
+			Index:       node.Index,
+			Name:        node.Name,
+			Result:      node.Result,
+			Variables:   node.Variables,
+			IsImportant: node.IsImportant,
 		})
 	}
 	for _, child := range node.Children {
@@ -499,32 +639,43 @@ func (r *Runtime) formatHistory() string {
 	// 从根节点开始全量扫描
 	root := r.cursor.GetRoot()
 	if root == nil {
-		return "No historical context available."
+		return "No global workspace context available."
 	}
 
 	allResults := r.collectGlobalAttention(root)
 	if len(allResults) == 0 {
-		return "No historical context available yet."
+		return "No global workspace entries available yet."
 	}
 
-	// 1. 按 Index 倒序排序（最新的在前面）
+	// 1. 优先级排序：Important 节点排在前面，然后按 Index 倒序
+	// 这是一个启发式的滑动窗口：如果内容太多，优先保留 Important 的
 	for i := 0; i < len(allResults); i++ {
 		for j := i + 1; j < len(allResults); j++ {
-			if allResults[i].Index < allResults[j].Index {
+			// 排序规则：Important 优先，同级按 Index 降序
+			iImportance := 0
+			if allResults[i].IsImportant {
+				iImportance = 1
+			}
+			jImportance := 0
+			if allResults[j].IsImportant {
+				jImportance = 1
+			}
+
+			if iImportance < jImportance || (iImportance == jImportance && allResults[i].Index < allResults[j].Index) {
 				allResults[i], allResults[j] = allResults[j], allResults[i]
 			}
 		}
 	}
 
-	// 2. 限制窗口大小（例如显示最近 10 条结果）
+	// 2. 限制窗口大小（例如显示最近 10 个最有用的节点）
 	const maxWindow = 10
 	limit := len(allResults)
 	if limit > maxWindow {
 		limit = maxWindow
 	}
 
-	// 3. 截取最近的结果，并按 Index 正序排回来显示，方便模型阅读
 	window := allResults[:limit]
+	// 再按 Index 正序排回来显示
 	for i := 0; i < len(window); i++ {
 		for j := i + 1; j < len(window); j++ {
 			if window[i].Index > window[j].Index {
@@ -534,9 +685,20 @@ func (r *Runtime) formatHistory() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Global Attention (Latest %d results picked from across the tree):\n", limit))
+	sb.WriteString(fmt.Sprintf("Global Workspace (RAM - Key findings and important variables picked from all nodes):\n"))
 	for _, res := range window {
-		sb.WriteString(fmt.Sprintf("- [%d] %s: %s\n", res.Index, res.Name, res.Result))
+		impTag := ""
+		if res.IsImportant {
+			impTag = " [PINNED]"
+		}
+		sb.WriteString(fmt.Sprintf("- [%d] %s%s:\n", res.Index, res.Name, impTag))
+		if res.Result != "" {
+			sb.WriteString(fmt.Sprintf("  Result: %s\n", res.Result))
+		}
+		if len(res.Variables) > 0 {
+			varsJSON, _ := json.Marshal(res.Variables)
+			sb.WriteString(fmt.Sprintf("  Variables: %s\n", string(varsJSON)))
+		}
 	}
 	return sb.String()
 }
