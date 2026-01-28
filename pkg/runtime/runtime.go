@@ -41,10 +41,10 @@ func (r *Runtime) Execute(initialRequest string) error {
 		return fmt.Errorf("root node is nil")
 	}
 
-	// 标记根节点为已遍历（如果还没有）
-	if !r.cursor.Current.WetherTraveled {
-		r.cursor.Current.MarkTraveled()
-	}
+	// 标记根节点为已遍历（由主循环负责，此处不再提前标记）
+	// if !r.cursor.Current.WetherTraveled {
+	// 	r.cursor.Current.MarkTraveled()
+	// }
 
 	// 主循环：深度优先搜索
 	maxIterations := 1000 // 防止无限循环
@@ -61,14 +61,26 @@ func (r *Runtime) Execute(initialRequest string) error {
 			break
 		}
 
+		// 📍 IMPROVEMENT(v10): Skip LLM call if already traveled
+		// Normal and Loop nodes only need LLM calls for their initial turn (to decompose/decide).
+		// Once traveled, they use decideNextStep to manage their children.
+		if current.WetherTraveled && current.Type != tasknode.Leaf {
+			// Special case: Loop nodes that have finished their children
+			// need decideNextStep to decide whether to loop again or move up.
+			fmt.Printf("📍 Step %d: Skipping LLM call for traveled node [%s] %s\n", iteration, current.ID, current.Name)
+			if err := r.decideNextStep(current); err != nil {
+				return fmt.Errorf("failed to decide next step: %w", err)
+			}
+			continue
+		}
+
 		// 调试输出
 		fmt.Printf("📍 Step %d: Processing node [%s] %s (Type: %v, Traveled: %v, Finished: %v)\n",
 			iteration, current.ID, current.Name, current.Type, current.WetherTraveled, current.WetherFinished)
 
 		// --- PASS 1: Attention Selection ---
-		// 每次对话前的先验：挑选有用的关联节点
+		// ... (rest of the prompt building and LLM call logic) ...
 		selectedNodeIDs := []string{}
-		// 只有在迭代次数大于 1（即已经产生了一些历史节点）时才需要扫索引
 		if iteration > 0 {
 			ids, err := r.selectAttentionNodes(current, initialRequest)
 			if err != nil {
@@ -78,40 +90,24 @@ func (r *Runtime) Execute(initialRequest string) error {
 			}
 		}
 
-		// 2. 构建 stateless prompt（包含选中的 RAM 信息）
+		// ... (Main LLM Call and Action Execution) ...
 		var response *llm.Response
 		maxRetries := 3
 		var lastErr error
 		retryCount := 0
 
 		for retryCount <= maxRetries {
-			if retryCount > 0 {
-				fmt.Printf("  ⚠️ Retry %d/%d due to error: %v\n", retryCount, maxRetries, lastErr)
-			}
-
-			// 使用 PASS 1 选中的节点构建主 Prompt
+			// ... (Prompt building, LLM Call, Parsing, Action Execution) ...
 			prompt, err := r.buildPromptWithWorkspace(current, initialRequest, selectedNodeIDs, lastErr)
 			if err != nil {
 				return fmt.Errorf("failed to build prompt: %w", err)
 			}
 
-			// 确保当前节点有 Index
 			if current.Index == -1 {
 				r.nodeCounter++
 				current.Index = r.nodeCounter
 			}
 
-			// 输出 prompt 用于调试
-			if retryCount == 0 {
-				fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-				fmt.Println("📤 PROMPT TO LLM:")
-				fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-				fmt.Println(prompt)
-				fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-				fmt.Println()
-			}
-
-			// 2. 与 LLM 对话（stateless）
 			fmt.Printf("  🤖 Calling LLM (Attempt %d)...\n", retryCount+1)
 			output, err := r.engine.Call(prompt)
 			if err != nil {
@@ -120,14 +116,12 @@ func (r *Runtime) Execute(initialRequest string) error {
 				continue
 			}
 
-			// 3. 解析 LLM 响应
 			response, lastErr = llm.ParseResponse(output.Response)
 			if lastErr != nil {
 				retryCount++
 				continue
 			}
 
-			// 4. 执行动作：创建节点或标记完成
 			actionErr := false
 			for _, action := range response.Actions {
 				if err := r.executeAction(action, current); err != nil {
@@ -142,8 +136,10 @@ func (r *Runtime) Execute(initialRequest string) error {
 				continue
 			}
 
-			// 如果走到这里，解析和执行都成功了
 			fmt.Printf("  ✅ Step processed successfully: %d action(s)\n", len(response.Actions))
+			if !current.WetherTraveled {
+				current.MarkTraveled()
+			}
 			break
 		}
 
@@ -151,33 +147,12 @@ func (r *Runtime) Execute(initialRequest string) error {
 			return fmt.Errorf("maximum retries (%d) reached for node [%s]: %w", maxRetries, current.ID, lastErr)
 		}
 
-		// 打印成功执行的动作（可选，因为之前已经打印了部分信息）
-		for _, action := range response.Actions {
-			if action.ActionType == "create_node" {
-				fmt.Printf("    ➕ Created node: [%s] %s (Type: %s)\n",
-					action.Node.ID, action.Node.Name, action.Node.Type)
-			} else if action.ActionType == "mark_complete" {
-				fmt.Printf("    ✓ Marked node as complete\n")
-			}
-		}
-
 		// 5. 决定下一步：下树还是上树
-		oldCurrent := r.cursor.Current
 		if err := r.decideNextStep(current); err != nil {
 			return fmt.Errorf("failed to decide next step: %w", err)
 		}
-
-		// 检查是否移动
-		if r.cursor.Current != oldCurrent {
-			if r.cursor.Current != nil {
-				fmt.Printf("  🔄 Moved to: [%s] %s\n", r.cursor.Current.ID, r.cursor.Current.Name)
-			} else {
-				fmt.Printf("  🔄 Reached root, execution complete\n")
-			}
-		}
 		fmt.Println()
 	}
-
 	return nil
 }
 
@@ -770,68 +745,52 @@ func nodeStatusStr(s tasknode.TaskStatus) string {
 // - 对于 Loop 节点：检查子节点是否都 finished，如果 finished 就 pop 栈并跳出 loop
 // - 对于 Leaf 节点：执行完成后直接返回上级
 func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
-	// 对于 Leaf 节点，执行完成后直接返回上级
+	// For Leaf nodes: Move up. They originate WetherFinished via actions.
 	if current.Type == tasknode.Leaf {
-		// Leaf 节点执行后标记为完成
-		if !current.WetherFinished {
-			current.MarkFinished()
-		}
 		r.cursor.MoveUp()
 		return nil
 	}
 
-	// 对于 Loop 节点，检查子节点是否都已完成
-	if current.Type == tasknode.Loop {
-		if current.AllChildrenFinished() {
-			// 所有子节点都已完成，标记当前 loop 节点为完成
-			current.MarkFinished()
-			r.cursor.MoveUp()
-			return nil
-		}
-		// Loop 节点未完成
-		// 如果所有子节点都已遍历但未完成，重置遍历状态以继续循环
-		if current.AllChildrenTraveled() && !current.AllChildrenFinished() {
-			// 重置子节点的遍历状态，允许重新执行
-			current.ResetChildrenTraveled()
-			fmt.Printf("  🔄 Loop not finished, resetting children traveled state to continue loop\n")
-		}
-		// 继续处理子节点
-	}
-
-	// 对于普通节点和 Loop 节点：
-	// 如果 wethertraveled 是 1（已遍历），寻找下一个未遍历的子节点
+	// For Normal/Loop nodes:
+	// We only decide next step AFTER the node has been traveled (processed at least once).
 	if current.WetherTraveled {
+		// 1. Try to move down to the next untraveled child.
 		nextChild := current.GetNextUntraveledChild()
 		if nextChild != nil {
-			// 有未遍历的子节点，向下移动
 			r.cursor.MoveDown()
 			return nil
 		}
-		// 所有子节点都已遍历
-		// 检查是否所有子节点都已完成
-		if len(current.Children) > 0 && current.AllChildrenFinished() {
-			// 所有子节点都已完成，标记当前节点为完成
-			current.MarkFinished()
+
+		// 2. All children are traveled. Check completion logic.
+		allFinished := current.AllChildrenFinished()
+
+		// Case: Loop node
+		if current.Type == tasknode.Loop {
+			if allFinished {
+				current.MarkFinished()
+				r.cursor.MoveUp()
+				return nil
+			}
+			// Loop not finished: reset children (traveled AND finished) and stay.
+			current.ResetChildrenStatus()
+			fmt.Printf("  🔄 Loop [%s] not finished, resetting children status for next iteration\n", current.ID)
+			return nil // Stay here to start next iteration
 		}
-		// 返回上级（如果是根节点，MoveUp 会将 Current 设为 nil，循环会结束）
+
+		// Case: Normal node
+		// Hierarchical AND: Only mark finished if all children are finished.
+		if allFinished || len(current.Children) == 0 {
+			current.MarkFinished()
+		} else {
+			// If not all finished but all traveled, move up anyway?
+			// In a strict DFS, if children failed or are stuck, the parent might fail.
+			// Currently, we move up and let the system continue.
+		}
 		r.cursor.MoveUp()
 		return nil
 	}
 
-	// 当前节点未遍历，先标记为已遍历，然后尝试向下移动
-	current.MarkTraveled()
-	if r.cursor.MoveDown() {
-		return nil
-	}
-
-	// 无法向下移动（没有子节点）
-	// 如果是 Leaf 节点或没有子节点，标记为完成
-	if current.Type == tasknode.Leaf || len(current.Children) == 0 {
-		current.MarkFinished()
-	}
-	// 返回上级（如果是根节点，MoveUp 会将 Current 设为 nil，循环会结束）
-	r.cursor.MoveUp()
-	return nil
+	return fmt.Errorf("node [%s] was not marked as traveled before deciding next step", current.ID)
 }
 
 // GetCurrentNode 获取当前节点

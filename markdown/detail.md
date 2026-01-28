@@ -21,3 +21,5 @@ B for循环
 这本质就是一个图灵机 cursor是读写头 想象一下 一个传统的程序 编程语言 有分支 循环 这就是图灵完备 在编译过程中会生成一个语法树 llmvm的目的就在于直接生成语法树 他的结构是 感知当前的节点类型 是否遍历过 是否完成 然后下一步 执行 就是和llm对话 llm给出结构性回答 给出结构性回答后进行执行 有一个解析器 解析 这个东西 然后去生成节点或者是不生成 决定下树还是上树
 
 对于普通节点 他有一个wethertraveled变量 如果wethertraveled变量是1 则寻找下一个子节点 如果全部的子节点wethertraveled 他就返回上级 对于loop 还有wetherfinished 变量 父节点的wether finished就是子节点wetherfinished的and操作 一旦有了loop节点 下面的节点有一个loop的wetherfinished的栈 看看子节点是否全部finished 如果finished 就pop栈 同时跳出这个loop子节点 而leaf节点就是最小的拆解节点 可以由llm单次上下文窗口完备处理 这就是下一代程序的核心灵魂
+
+api:sk-6cb6f64b1f83461cb7630968ca8bbeba

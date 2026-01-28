@@ -165,12 +165,14 @@ func (t *TaskNode) GetNextUntraveledChild() *TaskNode {
 	return nil
 }
 
-// ResetChildrenTraveled 重置所有子节点的遍历状态（用于 Loop 节点重新执行）
-func (t *TaskNode) ResetChildrenTraveled() {
+// ResetChildrenStatus 重置所有子节点的遍历和完成状态（用于 Loop 节点重新执行）
+func (t *TaskNode) ResetChildrenStatus() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	for _, child := range t.Children {
 		child.WetherTraveled = false
+		child.WetherFinished = false
+		child.Status = Pending
 		child.UpdatedAt = time.Now()
 	}
 }

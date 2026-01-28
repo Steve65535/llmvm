@@ -49,24 +49,20 @@ func (c *Cursor) MoveUp() bool {
 		return false
 	}
 
-	// 标记当前节点为已遍历
-	c.Current.MarkTraveled()
-
-	// 如果当前节点的父节点是 Loop 节点，检查是否需要从栈中弹出
-	parent := c.Current.Parent
-	if parent != nil && parent.Type == tasknode.Loop {
-		// 检查 Loop 节点的所有子节点是否都已完成
-		if parent.AllChildrenFinished() {
-			parent.MarkFinished()
-			// 从栈中弹出（如果栈顶是当前父节点）
-			if len(c.LoopStack) > 0 && c.LoopStack[len(c.LoopStack)-1] == parent {
-				c.LoopStack = c.LoopStack[:len(c.LoopStack)-1]
-			}
-		}
+	// 如果当前节点是 Loop 节点，且我们正从它向上移动（意味着它已结束）
+	if c.Current.Type == tasknode.Loop {
+		c.PopLoop(c.Current)
 	}
 
-	c.Current = parent
+	c.Current = c.Current.Parent
 	return true
+}
+
+// PopLoop 从栈中弹出指定的 Loop 节点
+func (c *Cursor) PopLoop(node *tasknode.TaskNode) {
+	if len(c.LoopStack) > 0 && c.LoopStack[len(c.LoopStack)-1] == node {
+		c.LoopStack = c.LoopStack[:len(c.LoopStack)-1]
+	}
 }
 
 // GetCurrentLoop 获取当前所在的 Loop 节点（栈顶）
