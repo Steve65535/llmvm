@@ -7,6 +7,7 @@ import (
 	"os"      // Added as per instruction
 	"os/exec" // Added as per instruction
 	"strings"
+	"time"
 
 	"github.com/Steve65535/llmvm/pkg/cursor"
 	"github.com/Steve65535/llmvm/pkg/llm"
@@ -100,7 +101,7 @@ func (r *Runtime) Execute(initialRequest string) error {
 
 		// ... (Main LLM Call and Action Execution) ...
 		var response *llm.Response
-		maxRetries := 3
+		maxRetries := 9
 		var lastErr error
 		retryCount := 0
 
@@ -535,8 +536,41 @@ func formatVariables(vars map[string]interface{}) string {
 	if len(vars) == 0 {
 		return "No scoped variables."
 	}
-	data, _ := json.MarshalIndent(vars, "", "  ")
-	return string(data)
+
+	var sb strings.Builder
+
+	// Print Command History first if available
+	if hist, ok := vars["command_output_history"]; ok {
+		sb.WriteString("### Command Execution History (Last 20):\n")
+		// Handle []string vs []interface{}
+		var history []string
+		if casted, ok := hist.([]string); ok {
+			history = casted
+		} else if castedInterface, ok := hist.([]interface{}); ok {
+			for _, item := range castedInterface {
+				if str, ok := item.(string); ok {
+					history = append(history, str)
+				}
+			}
+		}
+
+		for _, entry := range history {
+			sb.WriteString(entry + "\n\n")
+		}
+
+		// Remove it from the map copy to avoid duplication in JSON dump
+		// NOTE: scopedVariables is a copy in collectScopedVariables, so modifying it here is safe-ish,
+		// but collectScopedVariables creates a fresh map for us.
+		delete(vars, "command_output_history")
+	}
+
+	if len(vars) > 0 {
+		data, _ := json.MarshalIndent(vars, "", "  ")
+		sb.WriteString("\n### Other Variables:\n")
+		sb.WriteString(string(data))
+	}
+
+	return sb.String()
 }
 
 // executeAction 执行 LLM 返回的动作
@@ -581,11 +615,33 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 			return fmt.Errorf("command execution failed: %w", err)
 		}
 		fmt.Printf("📝 Command result: %s\n", result)
-		// 将结果存回节点变量
+		// 将结果存回节点变量 (Last Result)
 		if parent.Variables == nil {
 			parent.Variables = make(map[string]interface{})
 		}
 		parent.Variables["last_command_result"] = result
+
+		// Append to Command History
+		histEntry := fmt.Sprintf("[%s] $ %s\n> %s", time.Now().Format("15:04:05"), action.Command, result)
+		var history []string
+		if existing, ok := parent.Variables["command_output_history"]; ok {
+			if casted, ok := existing.([]string); ok {
+				history = casted
+			} else if castedInterface, ok := existing.([]interface{}); ok {
+				// Handle JSON unmarshaled slice
+				for _, item := range castedInterface {
+					if str, ok := item.(string); ok {
+						history = append(history, str)
+					}
+				}
+			}
+		}
+		history = append(history, histEntry)
+		// Keep last 20 commands to avoid context overflow
+		if len(history) > 20 {
+			history = history[len(history)-20:]
+		}
+		parent.Variables["command_output_history"] = history
 		return nil
 	case "shutdown":
 		return fmt.Errorf("EMERGENCY_SHUTDOWN: %s", action.Result)

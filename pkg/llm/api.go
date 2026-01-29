@@ -23,10 +23,17 @@ type ChatRequest struct {
 	Stream   bool          `json:"stream"`
 }
 
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 type ChatResponse struct {
 	Choices []struct {
 		Message ChatMessage `json:"message"`
 	} `json:"choices"`
+	Usage Usage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
@@ -79,8 +86,11 @@ Your role is to process semantic state and return structured actions for the Go-
     - **PERSISTENCE**: Remember, 'mark_complete' results are just memory. To permanently save a file, you must use 'write' or redirection (e.g., 'echo content > file.md').
     - Your Current Working Directory is the project root.
     - **CRITICAL**: All file operations (write, read, create) MUST be performed inside the directory 'test/sandbox'. Create it if it does not exist. Do not touch project root files.
+    - **INCREMENTAL WRITES**: Use '>>' to append to files. Examples:
+        * Append text: echo "new line" >> file.md
+        * Merge files: cat part.md >> total.md
     - Use 'create_node' for task decomposition.
-    - Use 'mark_complete' or 'update_variables' for state transition.
+    - Use 'mark_complete' or 'update_variables' for state transition. **CRITICAL**: You MUST write important results (like filenames, summaries) into 'variables' so they persist for future nodes.
 5. **Node Types**:
     - Normal: Task decomposition.
     - Loop: Cyclic/iterative tasks.
@@ -120,8 +130,11 @@ Example:
 
 ## Important Notes
 
+
 - Actions are executed sequentially. 
 - Results of execute_command will appear in your variables as last_command_result in the NEXT step.
+- **ERROR HANDLING**: If you receive a 'last_error' in your prompt, it means your previous attempt failed (JSON error or Execution error). You MUST analyze the error message and correct your JSON structure or data in this turn.
+- **SANDBOX**: All file operations must happen in 'test/sandbox/'.
 `
 
 	reqBody := ChatRequest{
@@ -169,14 +182,14 @@ Example:
 
 	respContent := chatResp.Choices[0].Message.Content
 
-	// 记录日志 (Input & Output)
-	logLLMConversation(prompt, respContent)
+	// 记录日志 (Input & Output & Usage)
+	logLLMConversation(prompt, respContent, chatResp.Usage)
 
 	return &Output{Response: respContent}, nil
 }
 
 // logLLMConversation 将对话记录到 test/llm_logs.txt
-func logLLMConversation(input, output string) {
+func logLLMConversation(input, output string, usage Usage) {
 	logDir := "test"
 	logFile := filepath.Join(logDir, "llm_logs.txt")
 
@@ -188,8 +201,8 @@ func logLLMConversation(input, output string) {
 	// 准备日志内容
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	separator := "================================================================================"
-	logEntry := fmt.Sprintf("%s\n[%s]\n\n[INPUT]\n%s\n\n[OUTPUT]\n%s\n%s\n\n",
-		separator, timestamp, input, output, separator)
+	logEntry := fmt.Sprintf("%s\n[%s]\n[TOKEN USAGE] Input: %d | Output: %d | Total: %d\n\n[INPUT]\n%s\n\n[OUTPUT]\n%s\n%s\n\n",
+		separator, timestamp, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, input, output, separator)
 
 	// 以追加模式打开文件
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
