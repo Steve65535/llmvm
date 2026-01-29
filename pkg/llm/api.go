@@ -78,6 +78,7 @@ Your role is to process semantic state and return structured actions for the Go-
     - **SUPPORTED**: Shell piping (|), redirection (>), background tasks, and standard Linux/Mac utilities.
     - **PERSISTENCE**: Remember, 'mark_complete' results are just memory. To permanently save a file, you must use 'write' or redirection (e.g., 'echo content > file.md').
     - Your Current Working Directory is the project root.
+    - **CRITICAL**: All file operations (write, read, create) MUST be performed inside the directory 'test/sandbox'. Create it if it does not exist. Do not touch project root files.
     - Use 'create_node' for task decomposition.
     - Use 'mark_complete' or 'update_variables' for state transition.
 5. **Node Types**:
@@ -85,18 +86,33 @@ Your role is to process semantic state and return structured actions for the Go-
     - Loop: Cyclic/iterative tasks.
     - Leaf: Atomic tasks that fit in one context window. If a task feels complex, decompose it!
 
-## Response Format
-You must respond with a single valid JSON object containing an array of 'actions'.
-` + "`" + `json
+## Response Format (STRICT)
+You must output a SINGLE, VALID JSON object.
+- **NO Markdown**: Do not use markdown code block wrappers (e.g. triple backtick json). Just raw JSON.
+- **NO Preamble/Postscript**: Do not write "Here is the JSON" or explanations.
+- **Strict Keys**: Use only the keys defined below. Parsing will fail otherwise.
+
+Example:
 {
   "actions": [
     {
       "action_type": "create_node",
-      "node": { "id": "...", "name": "...", "type": "Leaf", "information": "..." }
+      "node": { 
+        "id": "node_v1", 
+        "name": "Node With Vars", 
+        "type": "Normal", 
+        "information": "Description",
+        "variables": {
+          "key1": "value1",
+          "key2": 123,
+          "key3": true
+        },
+        "is_important": true
+      }
     },
     {
       "action_type": "execute_command",
-      "command": "ls ."
+      "command": "ls -la"
     }
   ]
 }
@@ -106,7 +122,6 @@ You must respond with a single valid JSON object containing an array of 'actions
 
 - Actions are executed sequentially. 
 - Results of execute_command will appear in your variables as last_command_result in the NEXT step.
-- Think step by step. Use the global context to find information from previously completed branches.
 `
 
 	reqBody := ChatRequest{
