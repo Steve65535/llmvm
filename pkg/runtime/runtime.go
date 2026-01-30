@@ -15,6 +15,12 @@ import (
 	"github.com/Steve65535/llmvm/pkg/vfs"
 )
 
+const (
+	MaxCommandResultLength = 4000
+	MaxHistoryEntryLength  = 1000
+	MaxVariableDumpLength  = 8000
+)
+
 // Runtime 是图灵完备的 LLM 运行时引擎
 type Runtime struct {
 	engine      llm.Engine
@@ -252,11 +258,19 @@ func (r *Runtime) formatGlobalWorkspace(nodeIDs []string) string {
 			foundAny = true
 			sb.WriteString(fmt.Sprintf("- [%s] %s:\n", node.ID, node.Name))
 			if node.Result != "" {
-				sb.WriteString(fmt.Sprintf("  Result: %s\n", node.Result))
+				resultStr := node.Result
+				if len(resultStr) > 1000 {
+					resultStr = resultStr[:1000] + " ... [TRUNCATED]"
+				}
+				sb.WriteString(fmt.Sprintf("  Result: %s\n", resultStr))
 			}
 			if len(node.Variables) > 0 {
 				varsJSON, _ := json.Marshal(node.Variables)
-				sb.WriteString(fmt.Sprintf("  Variables: %s\n", string(varsJSON)))
+				varsStr := string(varsJSON)
+				if len(varsStr) > 2000 {
+					varsStr = varsStr[:2000] + " ... [TRUNCATED]"
+				}
+				sb.WriteString(fmt.Sprintf("  Variables: %s\n", varsStr))
 			}
 		}
 	}
@@ -566,8 +580,12 @@ func formatVariables(vars map[string]interface{}) string {
 
 	if len(vars) > 0 {
 		data, _ := json.MarshalIndent(vars, "", "  ")
+		varsStr := string(data)
+		if len(varsStr) > MaxVariableDumpLength {
+			varsStr = varsStr[:MaxVariableDumpLength] + "\n... [TRUNCATED DUE TO SIZE]"
+		}
 		sb.WriteString("\n### Other Variables:\n")
-		sb.WriteString(string(data))
+		sb.WriteString(varsStr)
 	}
 
 	return sb.String()
@@ -615,13 +633,18 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 			return fmt.Errorf("command execution failed: %w", err)
 		}
 		fmt.Printf("📝 Command result: %s\n", result)
-		// 将结果存回节点变量 (Last Result)
-		if parent.Variables == nil {
-			parent.Variables = make(map[string]interface{})
+		// Truncate result for last_command_result
+		storageResult := result
+		if len(storageResult) > MaxCommandResultLength {
+			storageResult = storageResult[:MaxCommandResultLength] + "\n... [TRUNCATED]"
 		}
-		parent.Variables["last_command_result"] = result
+		parent.Variables["last_command_result"] = storageResult
 
 		// Append to Command History
+		// Truncate entry for history to avoid context bloating
+		if len(result) > MaxHistoryEntryLength {
+			result = result[:MaxHistoryEntryLength] + "\n... [TRUNCATED]"
+		}
 		histEntry := fmt.Sprintf("[%s] $ %s\n> %s", time.Now().Format("15:04:05"), action.Command, result)
 		var history []string
 		if existing, ok := parent.Variables["command_output_history"]; ok {

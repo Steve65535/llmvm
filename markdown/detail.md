@@ -27,7 +27,7 @@ api:sk-6cb6f64b1f83461cb7630968ca8bbeba
 ## 如何启动 (Startup)
 使用以下命令启动程序（已注入您的 API Key）：
 ```bash
-DEEPSEEK_API_KEY=sk-6cb6f64b1f83461cb7630968ca8bbeba go run cmd/main.go "写一个介绍中国航天旗下产品及其特点的markdown文档 先创建 再编辑 要求每个产品单独列举 并推断中国航天实现载人登陆火星的时间 要求每个产品都单独搜索 详细介绍 包括所有公开的技术参数 如果可以拆分一定要normal节点 而并非leaf
+DEEPSEEK_API_KEY=sk-6cb6f64b1f83461cb7630968ca8bbeba go run cmd/main.go "创建一个three.js驱动的3d应用 空间贪吃蛇
 "
 ```
 
