@@ -6,6 +6,7 @@ import (
 	"fmt"     // Added as per instruction
 	"os"      // Added as per instruction
 	"os/exec" // Added as per instruction
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -124,6 +125,11 @@ func (r *Runtime) Execute(initialRequest string) error {
 			}
 
 			fmt.Printf("  🤖 Calling LLM (Attempt %d)...\n", retryCount+1)
+
+			// 统计 Token 使用情况
+			const DeepSeekContextLimit = 64000 // DeepSeek 的上下文窗口
+			r.printTokenStats(prompt, DeepSeekContextLimit)
+
 			output, err := r.engine.Call(prompt)
 			if err != nil {
 				lastErr = fmt.Errorf("LLM call failed: %w", err)
@@ -196,7 +202,6 @@ func (r *Runtime) selectAttentionNodes(current *tasknode.TaskNode, request strin
 
 	// 2. 构建筛选 Prompt
 	selectorPrompt := fmt.Sprintf(`You are an Attention Selector for LLMVM.
-Your task is to scan the current state of the task tree and identify nodes whose Variables or Results are useful for the current step.
 
 ## Task Tree Index (Compact)
 %s
@@ -207,8 +212,18 @@ Your task is to scan the current state of the task tree and identify nodes whose
 - Goal: %s
 
 ## Your Task
-Identify which nodes from the Tree Index contain information (variables/results) that might be needed to solve the current goal. 
-Return ONLY a comma-separated list of Node IDs. If none are useful, return "none".
+Scan the Task Tree Index and select nodes that contain information relevant to the current goal.
+
+**Selection criteria**:
+- Nodes with variables that the current task might need (e.g., file paths, computed values)
+- Nodes with results that provide context (e.g., "file exists", "data loaded")
+- Recent nodes (higher index) are often more relevant
+- Nodes in the same branch or parent chain
+
+**Output format**: Comma-separated Node IDs (e.g., "node_1, node_5, create_dir")
+- If no nodes are relevant: return "none"
+- Limit to 5-10 most relevant nodes (avoid selecting too many)
+
 Example: "node_1, node_5, create_dir"`, treeIndex, current.ID, current.Name, request)
 
 	fmt.Printf("  🧠 Selecting relevant nodes from Global Tree...\n")
@@ -322,8 +337,14 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 	currentLoop := r.cursor.GetCurrentLoop()
 	loopInfo := ""
 	if isInLoop && currentLoop != nil {
-		loopInfo = fmt.Sprintf("Currently inside Loop node: %s (ID: %s). All children finished: %v",
+		loopInfo = fmt.Sprintf(`Currently inside Loop node: "%s" (ID: %s)
+- All children finished: %v
+- **To end this loop**: Mark the child node as 'finished' when the loop condition is met
+- **Loop variables**: Check the scoped variables below for loop counters (e.g., current_index, iteration_count)
+- **Important**: If you want to continue iterating, do NOT mark children as finished`,
 			currentLoop.Name, currentLoop.ID, currentLoop.AllChildrenFinished())
+	} else {
+		loopInfo = "Not currently in a Loop"
 	}
 
 	// 构建请求结构
@@ -353,10 +374,19 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 		errorContext = fmt.Sprintf(`
 > [!IMPORTANT]
 > **Previous Attempt Failed**:
-> The previous response resulted in the following error:
-> %v
+> Error: %v
 >
-> Please fix the error and provide a valid JSON response.
+> **Common causes**:
+> - Invalid JSON format (missing quotes, trailing commas, unescaped characters)
+> - Wrong action_type (must be exactly: create_node, mark_complete, update_variables, execute_command, shutdown)
+> - Missing required fields (e.g., node.id, node.name, node.type for create_node)
+> - Invalid node.type (must be exactly: Normal, Loop, or Leaf)
+>
+> **Please**:
+> 1. Fix the JSON syntax error carefully
+> 2. Verify all required fields are present
+> 3. Double-check action_type and node.type spelling (case-sensitive)
+> 4. Ensure all strings are in double quotes
 `, retryError)
 	}
 
@@ -407,11 +437,114 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 
 Please respond with valid JSON in the required format.
 
+## Node Type Guidelines
+
+**When to create each type**:
+- **Normal**: For tasks that can be decomposed into sequential sub-tasks
+  - Example: "Build web app" → [Setup, Frontend, Backend, Deploy]
+  
+- **Loop**: For tasks that need iteration until a condition is met
+  - Example: "Verify all even numbers 4-1000" → Loop with condition check
+  - **Critical**: You MUST mark child nodes as 'finished' when the loop should end
+  
+- **Leaf**: For atomic tasks that can be completed in one step
+  - Example: "Read file.txt", "Calculate sum", "Print result"
+  - Should NOT have child nodes
+
+**Current node type**: %s
+- If Normal and has no children yet: Consider decomposing into sub-tasks
+- If Loop and children not finished: Continue iteration or mark finished to end loop
+- If Leaf: Execute the task directly using commands or mark_complete
+
 ## Execution Requirements (STRICT):
+
 1. **Physical Persistence check**: If you see a file mentioned in a previous node's 'Result', **DO NOT** assume it exists physically. You MUST use 'ls' to verify its existence before attempting to 'cat' it.
+
 2. **Persistence**: To save results for future steps beyond semantic memory, you **MUST** use 'execute_command' with 'write'.
+
 3. **Decomposition**: If the current node is a Leaf node, process it now. If it requires multiple steps or complex logic, you SHOULD create child nodes first.
+
 4. **Tool Use**: Use 'pwd' to see current directory (always /). Use 'ls' to explore.
+
+5. **Variable Naming**: 
+   - Use descriptive names that include context (e.g., 'outer_loop_counter', 'file_processing_index')
+   - Avoid generic names like 'i', 'temp', 'data' in nested structures
+   - If you're in a Loop, prefix loop-specific variables with the loop's purpose (e.g., 'goldbach_current_even')
+
+6. **Incremental File Writing**:
+   - Use 'append_to_file' for building documents incrementally
+   - Each node can append its own section without rewriting the entire file
+   - This is more efficient and less error-prone than rewriting
+   - Example: Building a report where each node adds a section
+
+## Response Format Examples
+
+**Example 1: Create child nodes**
+`+"```json"+`
+{
+  "actions": [
+    {
+      "action_type": "create_node",
+      "node": {
+        "id": "read_data",
+        "name": "Read Data File",
+        "type": "Leaf",
+        "information": "Read data.csv and parse"
+      }
+    }
+  ]
+}
+`+"```"+`
+
+**Example 2: Mark current node complete**
+`+"```json"+`
+{
+  "actions": [
+    {
+      "action_type": "mark_complete",
+      "result": "Task completed successfully",
+      "is_important": true
+    }
+  ]
+}
+`+"```"+`
+
+**Example 3: Execute command**
+`+"```json"+`
+{
+  "actions": [
+    {
+      "action_type": "execute_command",
+      "command": "ls -la"
+    }
+  ]
+}
+`+"```"+`
+
+**Example 4: Append to file (incremental write)**
+`+"```json"+`
+{
+  "actions": [
+    {
+      "action_type": "append_to_file",
+      "file_path": "/absolute/path/to/document.md",
+      "content": "\n### A Midsummer Night's Dream\n\n**Written**: 1595-1596\n**Plot**: Four lovers and fairies in a magical forest.\n"
+    }
+  ]
+}
+`+"```"+`
+
+**Use append_to_file when**:
+- Building documents incrementally (reports, logs, analysis)
+- Writing content with special characters (quotes, apostrophes) - NO shell escaping needed!
+- Avoiding rewriting entire files (saves tokens and prevents errors)
+
+**Critical**: 
+- All string values must be in double quotes
+- No trailing commas
+- action_type must be exact (case-sensitive)
+- node.type must be exactly: Normal, Loop, or Leaf
+- **IMPORTANT**: Prefer append_to_file over echo commands to avoid shell escaping issues!
 `,
 		formatPath(taskPath),
 		current.ID, current.Name, nodeTypeStr(current.Type), nodeStatusStr(current.Status), current.Index,
@@ -423,7 +556,8 @@ Please respond with valid JSON in the required format.
 		string(jsonData),
 		varsStr,
 		errorContext,
-		request)
+		request,
+		nodeTypeStr(current.Type))
 
 	return prompt, nil
 }
@@ -460,15 +594,34 @@ func (r *Runtime) getChildrenInfo(node *tasknode.TaskNode) string {
 			childType = "Leaf"
 		}
 
-		info += fmt.Sprintf("  %d. [%s] %s (ID: %s) - Traveled: %s, Finished: %s\n",
-			i+1, childType, child.Name, child.ID, traveled, finished)
+		// 添加状态说明
+		statusNote := ""
+		if child.WetherTraveled && child.WetherFinished {
+			statusNote = " → This child has been executed and completed"
+		} else if child.WetherTraveled && !child.WetherFinished {
+			statusNote = " → This child has been visited but not fully completed (may have unfinished sub-tasks)"
+		} else {
+			statusNote = " → This child has not been executed yet"
+		}
+
+		info += fmt.Sprintf("  %d. [%s] %s (ID: %s) - Traveled: %s, Finished: %s%s\n",
+			i+1, childType, child.Name, child.ID, traveled, finished, statusNote)
 	}
 
+	// 添加状态含义说明
+	info += "\n**Status meanings**:\n"
+	info += "- Traveled: Whether this node has been visited by the execution cursor\n"
+	info += "- Finished: Whether this node has completed its task (for Loop nodes, this controls iteration)\n\n"
+
 	if allTraveled {
-		info += "\nAll children have been traveled."
+		info += "All children have been traveled: Yes\n"
+	} else {
+		info += "All children have been traveled: No\n"
 	}
 	if allFinished {
-		info += "\nAll children have been finished."
+		info += "All children have been finished: Yes"
+	} else {
+		info += "All children have been finished: No"
 	}
 
 	return info
@@ -666,6 +819,40 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		}
 		parent.Variables["command_output_history"] = history
 		return nil
+	case "append_to_file":
+		fmt.Printf("📝 Appending to file: %s\n", action.FilePath)
+
+		// 读取现有内容（如果文件存在）
+		existingContent := ""
+		if data, err := os.ReadFile(action.FilePath); err == nil {
+			existingContent = string(data)
+		}
+
+		// 追加新内容
+		newContent := existingContent + action.Content
+
+		// 确保目录存在
+		dir := filepath.Dir(action.FilePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+
+		// 写入文件
+		if err := os.WriteFile(action.FilePath, []byte(newContent), 0644); err != nil {
+			return fmt.Errorf("failed to append to file %s: %w", action.FilePath, err)
+		}
+
+		// 保存结果到变量
+		if parent.Variables == nil {
+			parent.Variables = make(map[string]interface{})
+		}
+		parent.Variables["last_file_written"] = action.FilePath
+		parent.Variables["last_file_size"] = len(newContent)
+
+		fmt.Printf("✅ Successfully appended %d bytes to %s (total: %d bytes)\n",
+			len(action.Content), action.FilePath, len(newContent))
+
+		return nil
 	case "shutdown":
 		return fmt.Errorf("EMERGENCY_SHUTDOWN: %s", action.Result)
 	default:
@@ -805,6 +992,45 @@ func (r *Runtime) handleCLI(command string) (string, error) {
 	}
 
 	return combined, nil
+}
+
+// estimateTokenCount 估算文本的 Token 数量
+// 简单规则：英文约 4 字符 = 1 token，中文约 1.5 字符 = 1 token
+func estimateTokenCount(text string) int {
+	// 统计中文字符数量
+	chineseCount := 0
+	for _, r := range text {
+		// 简单判断：大于 ASCII 范围的字符视为中文/多字节字符
+		if r > 127 {
+			chineseCount++
+		}
+	}
+
+	// 英文字符数量
+	englishCount := len(text) - chineseCount
+
+	// 估算 Token 数量
+	tokens := (englishCount / 4) + (chineseCount * 2 / 3)
+	return tokens
+}
+
+// printTokenStats 打印 Token 统计信息
+func (r *Runtime) printTokenStats(prompt string, contextLimit int) {
+	tokenCount := estimateTokenCount(prompt)
+	percentage := float64(tokenCount) / float64(contextLimit) * 100
+
+	fmt.Printf("\n📊 Token Statistics:\n")
+	fmt.Printf("   Prompt length: %d characters\n", len(prompt))
+	fmt.Printf("   Estimated tokens: %d / %d (%.1f%%)\n", tokenCount, contextLimit, percentage)
+
+	if percentage > 90 {
+		fmt.Printf("   ⚠️  WARNING: Approaching context limit!\n")
+	} else if percentage > 75 {
+		fmt.Printf("   ⚡ CAUTION: Using >75%% of context window\n")
+	} else {
+		fmt.Printf("   ✅ Context usage is healthy\n")
+	}
+	fmt.Printf("\n")
 }
 
 func nodeTypeStr(t tasknode.TaskType) string {

@@ -26,6 +26,16 @@
     *   **Try-Catch Mechanism**: Built-in retry loop (default 3 retries) for parsing or execution failures.
     *   **Error Feedback**: Runtime automatically captures errors and feeds them back to the LLM to guide self-correction.
 
+*   **Incremental File Writing (`append_to_file`)**: A specialized action that enables the LLM to build documents incrementally without shell escaping issues.
+    *   **No Shell Escaping**: Directly appends content to files, handling special characters (quotes, apostrophes) seamlessly.
+    *   **Tree-Friendly**: Each node can contribute its own section to a shared document.
+    *   **Token Efficient**: Avoids rewriting entire files, saving context window space.
+
+*   **Real-time Token Statistics**: Monitor context window usage at every LLM call.
+    *   **Usage Tracking**: Displays estimated tokens and percentage of context limit (default: 64K for DeepSeek).
+    *   **Auto Warnings**: Alerts when usage exceeds 75% or 90% thresholds.
+    *   **Optimization Guidance**: Helps identify when to decompose tasks or optimize prompts.
+
 *   **Bootstrapped JIT Logic**: The program isn't pre-written; it's compiled *Just-In-Time* by the LLM (acting as the ALU) and executed by the Go runtime (acting as the CPU).
 
 ## 🛠 Architecture

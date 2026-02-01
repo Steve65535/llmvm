@@ -50,6 +50,10 @@ type Action struct {
 	Result      string                 `json:"result,omitempty"`    // For setting node result
 	Command     string                 `json:"command,omitempty"`   // For execute_command
 	IsImportant bool                   `json:"is_important,omitempty"`
+
+	// 🆕 新增：文件追加操作
+	FilePath string `json:"file_path,omitempty"` // For append_to_file
+	Content  string `json:"content,omitempty"`   // For append_to_file
 }
 
 // Response 对应 response.json 的根结构
@@ -86,6 +90,16 @@ func ParseResponse(jsonStr string) (*Response, error) {
 				return nil, fmt.Errorf("action %d (create_node) missing node type", i)
 			default:
 				return nil, fmt.Errorf("action %d contains invalid node type: %s", i, action.Node.Type)
+			}
+		}
+
+		// 对于 append_to_file action，验证必需字段
+		if action.ActionType == "append_to_file" {
+			if action.FilePath == "" {
+				return nil, fmt.Errorf("action %d (append_to_file) missing file_path", i)
+			}
+			if action.Content == "" {
+				return nil, fmt.Errorf("action %d (append_to_file) missing content", i)
 			}
 		}
 		// mark_complete action 不需要 node 字段，所以不验证
