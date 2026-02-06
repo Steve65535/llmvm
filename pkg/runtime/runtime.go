@@ -1079,7 +1079,7 @@ func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
 			return nil
 		}
 
-		// 2. All children are traveled. Check completion logic.
+		// 2. All children are finished. Check completion logic.
 		allFinished := current.AllChildrenFinished()
 
 		// Case: Loop node

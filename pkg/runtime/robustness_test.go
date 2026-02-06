@@ -73,7 +73,7 @@ func TestRuntimeRetryLogic(t *testing.T) {
 
 func TestRuntimeMaxRetriesReached(t *testing.T) {
 	root := tasknode.NewTaskNode("root", "Root", tasknode.Leaf, []string{"Task"})
-	engine := &MockRetryEngine{FailCount: 5} // 超过 maxRetries (3)
+	engine := &MockRetryEngine{FailCount: 20} // 超过 maxRetries (3)
 	r := NewRuntime(engine, root)
 
 	err := r.Execute("Do something")
