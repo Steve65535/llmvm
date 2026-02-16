@@ -101,6 +101,7 @@ You must output a SINGLE, VALID JSON object.
 - **NO Markdown**: Do not use markdown code block wrappers (e.g. triple backtick json). Just raw JSON.
 - **NO Preamble/Postscript**: Do not write "Here is the JSON" or explanations.
 - **Strict Keys**: Use only the keys defined below. Parsing will fail otherwise.
+- **CRITICAL**: Failure to provide perfectly formatted JSON with correct fields will result in **SYSTEM FAILURE**. Your response is the ONLY way the VM functions.
 
 Example:
 {
@@ -109,20 +110,18 @@ Example:
       "action_type": "create_node",
       "node": { 
         "id": "node_v1", 
-        "name": "Node With Vars", 
+        "name": "Node With Handler", 
         "type": "Normal", 
         "information": "Description",
-        "variables": {
-          "key1": "value1",
-          "key2": 123,
-          "key3": true
-        },
-        "is_important": true
+        "error_handler_id": "optional_id",
+        "max_retries": 3
+      },
+      "error_handler_node": {
+         "id": "recovery_node",
+         "name": "Recovery Handler",
+         "type": "Leaf",
+         "information": "Executed if node_v1 fails"
       }
-    },
-    {
-      "action_type": "execute_command",
-      "command": "ls -la"
     }
   ]
 }
@@ -133,7 +132,9 @@ Example:
 
 - Actions are executed sequentially. 
 - Results of execute_command will appear in your variables as last_command_result in the NEXT step.
-- **ERROR HANDLING**: If you receive a 'last_error' in your prompt, it means your previous attempt failed (JSON error or Execution error). You MUST analyze the error message and correct your JSON structure or data in this turn.
+- **ERROR HANDLING**: 
+    - If you receive 'last_error', your previous attempt failed. Fix it in this turn.
+    - Risk-prone nodes SHOULD have an ` + "`" + `error_handler_node` + "`" + `.
 - **SANDBOX**: All file operations must happen in 'test/sandbox/'.
 `
 

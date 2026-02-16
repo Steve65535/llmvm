@@ -32,9 +32,11 @@ func (c *Cursor) MoveDown() bool {
 
 	nextChild := c.Current.GetNextUntraveledChild()
 	if nextChild != nil {
-		// 如果当前节点是 Loop 节点，将其推入栈
+		// 如果当前节点是 Loop 节点，且不在栈顶（幂等入栈），将其推入栈
 		if c.Current.Type == tasknode.Loop {
-			c.LoopStack = append(c.LoopStack, c.Current)
+			if len(c.LoopStack) == 0 || c.LoopStack[len(c.LoopStack)-1] != c.Current {
+				c.LoopStack = append(c.LoopStack, c.Current)
+			}
 		}
 		c.Current = nextChild
 		return true

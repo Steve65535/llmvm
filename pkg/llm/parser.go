@@ -17,6 +17,10 @@ type NodeDTO struct {
 	Variables   map[string]interface{} `json:"variables,omitempty"`
 	Index       int                    `json:"index,omitempty"`
 	IsImportant bool                   `json:"is_important,omitempty"`
+
+	// 🆕 新增：错误处理
+	ErrorHandlerID string `json:"error_handler_id,omitempty"`
+	MaxRetries     int    `json:"max_retries,omitempty"`
 }
 
 // NodeState 对应 request.json 中的 parent_info/current_info
@@ -54,6 +58,9 @@ type Action struct {
 	// 🆕 新增：文件追加操作
 	FilePath string `json:"file_path,omitempty"` // For append_to_file
 	Content  string `json:"content,omitempty"`   // For append_to_file
+
+	// 🆕 新增：错误处理
+	ErrorHandlerNode NodeDTO `json:"error_handler_node,omitempty"`
 }
 
 // Response 对应 response.json 的根结构

@@ -27,7 +27,7 @@ api:sk-6cb6f64b1f83461cb7630968ca8bbeba
 ## 如何启动 (Startup)
 使用以下命令启动程序（已注入您的 API Key）：
 ```bash
-DEEPSEEK_API_KEY=sk-6cb6f64b1f83461cb7630968ca8bbeba go run cmd/main.go "创建一个3d视觉效果的网站 是一个跨境电商网站 严格遵循软件工程流程执行"
+DEEPSEEK_API_KEY=sk-6cb6f64b1f83461cb7630968ca8bbeba go run cmd/main.go -save ecom_3d_site.json "创建一个3d视觉效果的网站 是一个跨境电商网站 严格遵循软件工程流程执行"
 ```
 
 ## 紧急停机 (Emergency Shutdown)

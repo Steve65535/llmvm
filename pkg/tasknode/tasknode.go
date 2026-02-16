@@ -29,7 +29,7 @@ type TaskNode struct {
 	Status         TaskStatus
 	Type           TaskType
 	Information    []string
-	Parent         *TaskNode
+	Parent         *TaskNode `json:"-"`
 	Children       []*TaskNode
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -39,6 +39,9 @@ type TaskNode struct {
 	Index          int    // 节点全局索引
 	Result         string // 节点执行结果摘要
 	IsImportant    bool   // 是否为重要节点（将被纳入全局 RAM）
+	ErrorHandler   *TaskNode
+	MaxRetries     int
+	RetryCount     int
 	mutex          sync.Mutex
 }
 
@@ -58,6 +61,9 @@ func NewTaskNode(id, name string, typ TaskType, info []string) *TaskNode {
 		Index:          -1, // 默认为 -1，由 Runtime 分配
 		Result:         "",
 		IsImportant:    false,
+		ErrorHandler:   nil,
+		MaxRetries:     9, // 默认重试 9 次
+		RetryCount:     0,
 	}
 }
 
@@ -174,5 +180,15 @@ func (t *TaskNode) ResetChildrenStatus() {
 		child.WetherFinished = false
 		child.Status = Pending
 		child.UpdatedAt = time.Now()
+	}
+}
+
+// RestoreParents 递归恢复所有子节点的 Parent 指针（用于从 JSON 反序列化后恢复树结构）
+func (t *TaskNode) RestoreParents() {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for _, child := range t.Children {
+		child.Parent = t
+		child.RestoreParents()
 	}
 }

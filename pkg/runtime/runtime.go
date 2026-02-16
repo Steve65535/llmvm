@@ -29,6 +29,9 @@ type Runtime struct {
 	initialReq  string
 	nodeCounter int // 全局节点计数器
 	vfs         *vfs.VirtualFileSystem
+
+	// OnStepComplete is called after each node execution step
+	OnStepComplete func(*tasknode.TaskNode)
 }
 
 // NewRuntime 创建新的运行时实例
@@ -149,14 +152,23 @@ func (r *Runtime) Execute(initialRequest string) error {
 					if strings.Contains(err.Error(), "EMERGENCY_SHUTDOWN") {
 						return err
 					}
+					// 🔧 FIX: 错误处理与重试逻辑
 					lastErr = fmt.Errorf("failed to execute action: %w", err)
+					if r.handleError(current, lastErr) {
+						// 错误已被处理（重定向到 Handler），跳过后续 Action
+						actionErr = false
+						break
+					}
 					actionErr = true
 					break
 				}
 			}
 
 			if actionErr {
-				retryCount++
+				current.RetryCount++
+				if current.RetryCount > current.MaxRetries {
+					return fmt.Errorf("maximum retries (%d) reached for node [%s]: %w", current.MaxRetries, current.ID, lastErr)
+				}
 				continue
 			}
 
@@ -164,11 +176,14 @@ func (r *Runtime) Execute(initialRequest string) error {
 			if !current.WetherTraveled {
 				current.MarkTraveled()
 			}
+			// 重置重试计数
+			current.RetryCount = 0
 			break
 		}
 
-		if retryCount > maxRetries {
-			return fmt.Errorf("maximum retries (%d) reached for node [%s]: %w", maxRetries, current.ID, lastErr)
+		// 🆕 执行回调（用于持久化等）
+		if r.OnStepComplete != nil {
+			r.OnStepComplete(current)
 		}
 
 		// 5. 决定下一步：下树还是上树
@@ -477,6 +492,11 @@ Please respond with valid JSON in the required format.
    - This is more efficient and less error-prone than rewriting
    - Example: Building a report where each node adds a section
 
+7. **CRITICAL: STRUCTURAL INTEGRITY & ERROR HANDLING**:
+   - **JSON Format**: You MUST return a single valid JSON. Any extra text or markdown will cause system failure.
+   - **Error Handling**: For risky operations (I/O, network, complex calculations), you MUST provide an `+"`"+`error_handler_node`+"`"+` in your `+"`"+`create_node`+"`"+` action. Failure to do so will result in cascading failures and task termination.
+   - **Completeness**: Every path in your tree MUST end with a `+"`"+`mark_complete`+"`"+` action.
+
 ## Response Format Examples
 
 **Example 1: Create child nodes**
@@ -751,6 +771,12 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		// 创建新节点
 		childNode := action.Node.ToTaskNode()
 		parent.AddChild(childNode)
+
+		// 🆕 如果指定了错误处理节点
+		if action.ErrorHandlerNode.ID != "" {
+			errorHandler := action.ErrorHandlerNode.ToTaskNode()
+			childNode.ErrorHandler = errorHandler
+		}
 		return nil
 	case "mark_complete":
 		// 标记当前节点为完成
@@ -938,7 +964,7 @@ func (r *Runtime) formatHistory() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Global Workspace (RAM - Key findings and important variables picked from all nodes):\n"))
+	sb.WriteString("Global Workspace (RAM - Key findings and important variables picked from all nodes):\n")
 	for _, res := range window {
 		impTag := ""
 		if res.IsImportant {
@@ -1113,6 +1139,41 @@ func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
 	}
 
 	return fmt.Errorf("node [%s] was not marked as traveled before deciding next step", current.ID)
+}
+
+// handleError 尝试处理发生的错误。如果已经有配套的 ErrorHandler，则重定向执行。
+func (r *Runtime) handleError(node *tasknode.TaskNode, err error) bool {
+	if node.ErrorHandler == nil {
+		return false // 没有错误处理器
+	}
+
+	fmt.Printf("  ⚠️ Node [%s] failed: %v\n", node.ID, err)
+	fmt.Printf("  🔧 Executing error handler: %s\n", node.ErrorHandler.Name)
+
+	// 保存错误信息到变量
+	if node.Variables == nil {
+		node.Variables = make(map[string]interface{})
+	}
+	node.Variables["last_error"] = err.Error()
+
+	// 将错误处理节点添加为子节点（如果还没有）
+	isAlreadyChild := false
+	for _, c := range node.Children {
+		if c.ID == node.ErrorHandler.ID {
+			isAlreadyChild = true
+			break
+		}
+	}
+	if !isAlreadyChild {
+		node.AddChild(node.ErrorHandler)
+	}
+
+	// 标记当前节点为已遍历（跳过原来可能未完成的正常路径）
+	if !node.WetherTraveled {
+		node.MarkTraveled()
+	}
+
+	return true // 错误已被重定向处理
 }
 
 // GetCurrentNode 获取当前节点

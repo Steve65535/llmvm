@@ -2,10 +2,15 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
+	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/Steve65535/llmvm/pkg/llm"
 	"github.com/Steve65535/llmvm/pkg/runtime"
@@ -13,73 +18,114 @@ import (
 )
 
 func main() {
+	// 0. 解析命令行参数
+	savePath := flag.String("save", "", "Path to save execution state (JSON)")
+	loadPath := flag.String("load", "", "Path to load execution state (JSON)")
+	flag.Parse()
+
 	// 1. 初始化 LLM 引擎
 	var engine llm.Engine
 	apiEngine, err := llm.NewDeepSeekEngine()
 	if err != nil {
-		// 如果 DeepSeek 不可用，使用 StubEngine 进行测试
 		fmt.Println("⚠️  Warning: DeepSeek API not available, using StubEngine for testing")
-		fmt.Println("   Set DEEPSEEK_API_KEY environment variable to use DeepSeek API")
-		fmt.Println()
 		engine = &llm.StubEngine{}
 	} else {
 		fmt.Println("✅ DeepSeek API initialized successfully")
-		fmt.Println()
 		engine = apiEngine
 	}
 
-	// 2. 获取用户命令
-	var command string
-	if len(os.Args) > 1 {
-		// 从命令行参数获取命令
-		command = strings.Join(os.Args[1:], " ")
-		fmt.Printf("📝 Command from arguments: %s\n\n", command)
-	} else {
-		// 交互式输入命令
-		fmt.Println("🚀 LLMVM - Turing Complete Agent Runtime")
-		fmt.Println("==========================================")
-		fmt.Println("Enter your command (or 'exit' to quit):")
-		fmt.Print("> ")
+	var root *tasknode.TaskNode
+	var initialRequest string
 
-		reader := bufio.NewReader(os.Stdin)
-		input, err := reader.ReadString('\n')
+	// 2. 加载或创建初始状态
+	if *loadPath != "" {
+		fmt.Printf("📂 Loading state from %s...\n", *loadPath)
+		data, err := ioutil.ReadFile(*loadPath)
 		if err != nil {
-			log.Fatalf("Failed to read input: %v", err)
+			log.Fatalf("❌ Failed to read save file: %v", err)
 		}
+		if err := json.Unmarshal(data, &root); err != nil {
+			log.Fatalf("❌ Failed to unmarshal state: %v", err)
+		}
+		root.RestoreParents()
+		initialRequest = root.Information[0] // 假设第一个 info 是原始请求
+		fmt.Println("✅ State loaded successfully")
+	} else {
+		// 获取用户命令
+		var command string
+		args := flag.Args()
+		if len(args) > 0 {
+			command = strings.Join(args, " ")
+			fmt.Printf("📝 Command from arguments: %s\n\n", command)
+		} else {
+			fmt.Println("🚀 LLMVM - Turing Complete Agent Runtime")
+			fmt.Println("==========================================")
+			fmt.Println("Enter your command (or 'exit' to quit):")
+			fmt.Print("> ")
 
-		command = strings.TrimSpace(input)
-		if command == "" {
-			fmt.Println("No command provided. Exiting.")
-			return
+			reader := bufio.NewReader(os.Stdin)
+			input, err := reader.ReadString('\n')
+			if err != nil {
+				log.Fatalf("Failed to read input: %v", err)
+			}
+
+			command = strings.TrimSpace(input)
+			if command == "" || strings.ToLower(command) == "exit" {
+				return
+			}
 		}
-		if strings.ToLower(command) == "exit" {
-			fmt.Println("Goodbye!")
-			return
-		}
-		fmt.Println()
+		initialRequest = command
+		root = tasknode.NewTaskNode("root", "Root Task", tasknode.Normal, []string{command})
+		root.SetStatus(tasknode.Running)
 	}
 
-	// 3. 创建根节点（根据用户命令）
-	root := tasknode.NewTaskNode("root", "Root Task", tasknode.Normal, []string{command})
-	root.SetStatus(tasknode.Running)
-
-	// 4. 创建运行时
+	// 3. 创建运行时并执行
 	rt := runtime.NewRuntime(engine, root)
 
-	// 5. 执行深度优先搜索，构建语法树
-	fmt.Println("🌳 Starting syntax tree construction...")
-	fmt.Printf("📋 Initial command: %s\n\n", command)
-	fmt.Println("⏳ Executing depth-first search...")
-	fmt.Println()
-
-	if err := rt.Execute(command); err != nil {
-		log.Fatalf("❌ Execution failed: %v", err)
+	// 🆕 增量保存支持
+	if *savePath != "" {
+		rt.OnStepComplete = func(node *tasknode.TaskNode) {
+			fmt.Printf("💾 Autosaving state to %s...\n", *savePath)
+			data, _ := json.MarshalIndent(root, "", "  ")
+			ioutil.WriteFile(*savePath, data, 0644)
+		}
 	}
 
-	// 6. 打印结果树
+	// 🆕 信号处理（Ctrl+C 自动保存）
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		fmt.Println("\n⚠️  Interrupted. Performing emergency save...")
+		if *savePath != "" {
+			data, _ := json.MarshalIndent(root, "", "  ")
+			ioutil.WriteFile(*savePath, data, 0644)
+			fmt.Printf("✅ State saved to %s. Exiting.\n", *savePath)
+		}
+		os.Exit(0)
+	}()
+
+	fmt.Println("🌳 Starting execution...")
+	if err := rt.Execute(initialRequest); err != nil {
+		fmt.Printf("❌ Execution error: %v\n", err)
+		// 即使出错也尝试保存状态
+	}
+
+	// 4. 如果指定了保存路径，则持久化
+	if *savePath != "" {
+		fmt.Printf("💾 Saving state to %s...\n", *savePath)
+		data, _ := json.MarshalIndent(root, "", "  ")
+		if err := ioutil.WriteFile(*savePath, data, 0644); err != nil {
+			fmt.Printf("❌ Failed to save state: %v\n", err)
+		} else {
+			fmt.Println("✅ State saved successfully")
+		}
+	}
+
+	// 5. 打印结果树
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", 60))
-	fmt.Println("✅ Execution Complete - Syntax Tree:")
+	fmt.Println("✅ Final Syntax Tree:")
 	fmt.Println(strings.Repeat("=", 60))
 	printTree(root, 0)
 }
