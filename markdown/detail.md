@@ -22,12 +22,49 @@ B for循环
 
 对于普通节点 他有一个wethertraveled变量 如果wethertraveled变量是1 则寻找下一个子节点 如果全部的子节点wethertraveled 他就返回上级 对于loop 还有wetherfinished 变量 父节点的wether finished就是子节点wetherfinished的and操作 一旦有了loop节点 下面的节点有一个loop的wetherfinished的栈 看看子节点是否全部finished 如果finished 就pop栈 同时跳出这个loop子节点 而leaf节点就是最小的拆解节点 可以由llm单次上下文窗口完备处理 这就是下一代程序的核心灵魂
 
-api:sk-6cb6f64b1f83461cb7630968ca8bbeba
+api: [HIDDEN_FOR_SECURITY_SEE_ENV]
 
 ## 如何启动 (Startup)
-使用以下命令启动程序（已注入您的 API Key）：
+
+1. **配置环境变量**:
+   在项目根目录创建 `.env` 文件，填入你的 API Key：
+   ```bash
+   DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+
+2. **启动程序**:
+   使用 `env` 命令加载环境变量并运行：
+   ```bash
+   # 加载 .env 并运行 (Linux/macOS)
+   export $(cat .env | xargs) && go run cmd/main.go -save ecom_3d_site.json "创建一个3d视觉效果的网站 是一个跨境电商网站 严格遵循软件工程流程执行"
+   ```
+
+---
+
+## 🚀 终极测试：分形大海捞针 (Fractal Haystack)
+
+这是一个专门设计用来击败 CoT (Chain of Thought) 的长程 DFS 任务。
+
+**测试命令**:
 ```bash
-DEEPSEEK_API_KEY=sk-6cb6f64b1f83461cb7630968ca8bbeba go run cmd/main.go -save ecom_3d_site.json "创建一个3d视觉效果的网站 是一个跨境电商网站 严格遵循软件工程流程执行"
+export $(cat .env | xargs) && go run cmd/main.go -save fractal_test.json "
+# 任务：分形大海捞针实验 (Fractal Haystack)
+
+## 阶段 1：构建迷宫 (Setup)
+1. 在 'test/sandbox/fractal_maze' 下创建一个深度为 6、每层分支为 3 的复杂目录结构。
+2. 在这个迷宫的**最深处**的随机 5 个 Leaf 节点中，分别创建 5 个文件：'key_fragment_1.txt' 到 'key_fragment_5.txt'。
+3. 请确保路径足够随机和复杂。
+
+## 阶段 2：深度优先搜索 (The Challenge)
+1. **遗忘**：你必须假设你不知道迷宫的结构。
+2. **规则**：你必须使用 Shell 命令 ('ls', 'cd', 'cat') 遍历整个文件系统来寻找这 5 个碎片。
+3. **约束**：你必须严格遵循 **DFS (深度优先搜索)** 顺序。进入一个目录，探索到底，再回溯。
+4. **目标**：找到所有 5 个碎片，读取内容，并将它们合并到 'test/sandbox/final_key.txt'。
+
+## 为什么这对你很难？
+- 传统的 Agent 会在探索 50 个目录后耗尽上下文窗口 (Context Overflow)。
+- 你必须利用你的 **Loop Node (栈)** 和 **Stateless** 特性，在每次回溯时释放内存。
+"
 ```
 
 ## 紧急停机 (Emergency Shutdown)
@@ -281,3 +318,39 @@ F(n) = F(n-1) + F(n-2)
 ✅ **工具集成**：可以调用外部程序和命令  
 
 这正是发表在 Nature Machine Intelligence 所需要的**杀手级应用案例**。
+
+---
+
+## 🔢 实验 2：哥德巴赫猜想 (The Goldbach Loop)
+
+这是一个 **"无法作弊 (Uncheatable)"** 的计算任务。
+与 `find` 文件不同，这个任务的目标是**动态计算**出来的。没有捷径，只有硬抗计算量。
+
+**测试命令**:
+```bash
+export $(cat .env | xargs) && go run cmd/main.go -save goldbach_test.json "
+# 任务：哥德巴赫猜想验证 (The Goldbach Loop)
+
+## 目标
+验证哥德巴赫猜想对于 **4 到 1000** 之间的所有偶数都成立。
+(哥德巴赫猜想：任一大于 2 的偶数都可写成两个质数之和。)
+
+## 规则 (Strict Constraints)
+1. **必须使用 Loop 节点**：你不能在一个步骤里验证所有数字。你必须创建一个 Loop 节点，通过迭代来逐个验证。
+2. **拒绝批处理**：不要写一个 Python 脚本一次性跑完。因为我们要测试的是 **LLMVM 的长时间无状态推理能力**，而不是 Python 的计算能力。你必须让 LLM 来控制循环。
+3. **记录证据**：对于每一个偶数 n，你必须找到两个质数 p1, p2，并在 'test/sandbox/goldbach_results.txt' 中追加一行记录：
+   Example: '10 = 3 + 7'
+4. **验证逻辑**：
+   - 检查 n 是否为偶数。
+   - 寻找 p1, p2。
+   - 验证 p1, p2 是否为质数。
+   - 验证 p1 + p2 == n。
+   - 写入文件。
+   - 继续下一个偶数。
+
+## 为什么这对你很难？
+- 你需要进行约 500 次推理迭代。
+- 如果你是传统的 CoT，跑到第 50 个数字时，Context 就会爆炸。
+- 你必须展示如何利用 **Pop Stack** 来保持大脑并在数千步操作后依然保持清醒。
+"
+```

@@ -30,6 +30,10 @@ type Runtime struct {
 	nodeCounter int // 全局节点计数器
 	vfs         *vfs.VirtualFileSystem
 
+	// Stagnation Detection
+	lastResponse    string // Store last LLM response text
+	stagnationCount int    // Counter for identical repeated responses
+
 	// OnStepComplete is called after each node execution step
 	OnStepComplete func(*tasknode.TaskNode)
 }
@@ -72,25 +76,31 @@ func (r *Runtime) Execute(initialRequest string) error {
 			break
 		}
 
-		// 📍 IMPROVEMENT(v10/v11): Skip LLM call if already traveled
-		// Normal and Loop nodes only need LLM calls for their initial turn (to decompose/decide).
-		// Once traveled, they use decideNextStep to manage their children.
-		if current.WetherTraveled && current.Type != tasknode.Leaf {
-			// Special case: For Normal nodes, if all children are traveled, we move up.
-			// But first, we ensure it has a chance to decide its own Finished status if it has no children.
-			if current.Type == tasknode.Normal && current.AllChildrenTraveled() {
-				fmt.Printf("📍 Step %d: Normal node [%s] %s - All children traveled, moving up\n", iteration, current.ID, current.Name)
-				if err := r.decideNextStep(current); err != nil {
-					return fmt.Errorf("failed to decide next step: %w", err)
-				}
-				continue
-			}
-
-			fmt.Printf("📍 Step %d: Skipping LLM call for traveled node [%s] %s\n", iteration, current.ID, current.Name)
+		// 📍 IMPROVEMENT(v10/v11): Global Skip logic
+		if current.WetherFinished {
 			if err := r.decideNextStep(current); err != nil {
-				return fmt.Errorf("failed to decide next step: %w", err)
+				return err
 			}
 			continue
+		}
+
+		if current.WetherTraveled {
+			if current.Type == tasknode.Normal || current.Type == tasknode.Loop {
+				// 如果有未完成的子节点，优先深入处理子节点，而不是呼叫 LLM
+				if r.hasUnfinishedChildren(current) {
+					if r.cursor.MoveFirstUnfinishedChild() {
+						continue
+					}
+				}
+				// 对于 Normal 节点，如果子节点已全部遍历（且没被标记为 Finished），则认为该节点逻辑结束。
+				if current.Type == tasknode.Normal {
+					if err := r.decideNextStep(current); err != nil {
+						return err
+					}
+					continue
+				}
+				// 对于 Loop 节点，如果所有已知子节点已完成，允许再次 callLLM 决定是否有下一轮
+			}
 		}
 
 		// 调试输出
@@ -146,9 +156,23 @@ func (r *Runtime) Execute(initialRequest string) error {
 				continue
 			}
 
+			// 📍 Stagnation Detection: Detect identical repeated responses
+			if output.Response == r.lastResponse {
+				r.stagnationCount++
+				fmt.Printf("  ⚠️  Stagnation Detected (Level %d/3) for node [%s]\n", r.stagnationCount, current.ID)
+				if r.stagnationCount >= 2 {
+					lastErr = fmt.Errorf("STAGNATION_DETECTED: You are repeating your previous response exactly. Break the loop! Change your strategy or create a new node to progress. Do not repeat the same observation command.")
+					retryCount++
+					continue
+				}
+			} else {
+				r.lastResponse = output.Response
+				r.stagnationCount = 0
+			}
+
 			actionErr := false
 			for _, action := range response.Actions {
-				if err := r.executeAction(action, current); err != nil {
+				if err := r.ExecuteAction(action, current); err != nil {
 					if strings.Contains(err.Error(), "EMERGENCY_SHUTDOWN") {
 						return err
 					}
@@ -167,7 +191,13 @@ func (r *Runtime) Execute(initialRequest string) error {
 			if actionErr {
 				current.RetryCount++
 				if current.RetryCount > current.MaxRetries {
-					return fmt.Errorf("maximum retries (%d) reached for node [%s]: %w", current.MaxRetries, current.ID, lastErr)
+					fmt.Printf("⚠️ Max retries (%d) reached for node [%s]. Marking as Failed and continuing...\n", current.MaxRetries, current.ID)
+					current.Status = tasknode.Failed
+					current.Result = fmt.Sprintf("Error: Maximum retries reached. Last error: %v", lastErr)
+					if err := r.decideNextStep(current); err != nil {
+						return err
+					}
+					break
 				}
 				continue
 			}
@@ -270,7 +300,7 @@ func (r *Runtime) getTreeIndex(node *tasknode.TaskNode, indent int) string {
 }
 
 // formatGlobalWorkspace 根据选中的 ID 组合详细的 RAM 快照
-func (r *Runtime) formatGlobalWorkspace(nodeIDs []string) string {
+func (r *Runtime) FormatGlobalWorkspace(nodeIDs []string) string {
 	if len(nodeIDs) == 0 {
 		return "No nodes selected for global workspace."
 	}
@@ -371,11 +401,11 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 	}
 
 	// 收集从根到当前的 Scoped Variables
-	scopedVariables := r.collectScopedVariables(current)
+	scopedVariables := r.CollectScopedVariables(current)
 	varsStr := formatVariables(scopedVariables)
 
 	// Global Workspace (Stateless, based on selection)
-	workspaceStr := r.formatGlobalWorkspace(selectedNodeIDs)
+	workspaceStr := r.FormatGlobalWorkspace(selectedNodeIDs)
 
 	// 转换为 JSON（用于结构化数据展示）
 	jsonData, err := json.MarshalIndent(req, "", "    ")
@@ -386,23 +416,26 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 	// 如果有重试错误信息，添加到 prompt 中
 	errorContext := ""
 	if retryError != nil {
+		specificAdvice := ""
+		errStr := retryError.Error()
+		if strings.Contains(errStr, "SyntaxError") && strings.Contains(errStr, "python") {
+			specificAdvice = "\n> [!CAUTION]\n" +
+				"> **Python Syntax Error Detected**: You are likely using 'for' or 'if' blocks in a single-line `python3 -c` command. \n" +
+				"> This is NOT allowed in one-liners. \n" +
+				"> **Fix**: Use list comprehensions or write the code to a temporary .py file and run it instead."
+		}
+
 		errorContext = fmt.Sprintf(`
 > [!IMPORTANT]
 > **Previous Attempt Failed**:
 > Error: %v
+%s
 >
-> **Common causes**:
-> - Invalid JSON format (missing quotes, trailing commas, unescaped characters)
-> - Wrong action_type (must be exactly: create_node, mark_complete, update_variables, execute_command, shutdown)
-> - Missing required fields (e.g., node.id, node.name, node.type for create_node)
-> - Invalid node.type (must be exactly: Normal, Loop, or Leaf)
->
-> **Please**:
-> 1. Fix the JSON syntax error carefully
-> 2. Verify all required fields are present
-> 3. Double-check action_type and node.type spelling (case-sensitive)
-> 4. Ensure all strings are in double quotes
-`, retryError)
+> **Possible Causes & Self-Correction**:
+> 1. **Mirroring Failure**: You just repeated the exact same error as the previous turn. STOP and change your strategy.
+> 2. **Python Syntax**: If using '-c', don't use nested blocks. Use simple expressions.
+> 3. **JSON Format**: Ensure no unescaped quotes or trailing commas.
+`, retryError, specificAdvice)
 	}
 
 	// 构建完整的 prompt
@@ -463,7 +496,10 @@ Please respond with valid JSON in the required format.
   - **Critical**: You MUST mark child nodes as 'finished' when the loop should end
   
 - **Leaf**: For atomic tasks that can be completed in one step
-  - Example: "Read file.txt", "Calculate sum", "Print result"
+  - Supports **Agentic Loop**: execute_command → observe result → refine → mark_complete
+  - You can execute multiple commands before calling mark_complete
+  - Only call mark_complete when you are SATISFIED with the result
+  - If you execute a command without mark_complete, you will get another turn
   - Should NOT have child nodes
 
 **Current node type**: %s
@@ -472,6 +508,12 @@ Please respond with valid JSON in the required format.
 - If Leaf: Execute the task directly using commands or mark_complete
 
 ## Execution Requirements (STRICT):
+
+0. **STRICT PROHIBITION ON PROGRAMMING LANGUAGES**: 
+   - DO NOT USE 'python3', 'node', 'ruby', 'perl', or any other programming language interpreters.
+   - All reasoning, mathematical calculations (like prime checking), and logic MUST be performed by YOU, decomposing them into atomic steps within the Task Tree.
+   - You may use simple shell tools like 'expr', 'bc', 'awk', or 'sed' for basic calculations, but the logic must reside in your reasoning process.
+   - The goal is to test YOUR ability to orchestrate complex reasoning via the Task Tree structure.
 
 1. **Physical Persistence check**: If you see a file mentioned in a previous node's 'Result', **DO NOT** assume it exists physically. You MUST use 'ls' to verify its existence before attempting to 'cat' it.
 
@@ -496,6 +538,14 @@ Please respond with valid JSON in the required format.
    - **JSON Format**: You MUST return a single valid JSON. Any extra text or markdown will cause system failure.
    - **Error Handling**: For risky operations (I/O, network, complex calculations), you MUST provide an `+"`"+`error_handler_node`+"`"+` in your `+"`"+`create_node`+"`"+` action. Failure to do so will result in cascading failures and task termination.
    - **Completeness**: Every path in your tree MUST end with a `+"`"+`mark_complete`+"`"+` action.
+
+8. **Loop State Awareness**:
+   - If a task fails or syntax errors occur, DO NOT repeat the same failing command.
+   - Ensure loop variables (e.g. 'current_even') are updated even if a sub-step has a minor logging error, to prevent infinite loops on the same number.
+
+10. **Stagnation Defense**:
+   - If you repeat the same observation command (e.g., 'cat results.txt') more than twice without creating a new node, marking a node complete, or updating variables, YOU ARE STAGNATED.
+   - Break the cycle: Analyze why you are repeating yourself. If the next iteration number is missing, CREATE the node for it. Do not wait for the system to prompt you.
 
 ## Response Format Examples
 
@@ -626,6 +676,11 @@ func (r *Runtime) getChildrenInfo(node *tasknode.TaskNode) string {
 
 		info += fmt.Sprintf("  %d. [%s] %s (ID: %s) - Traveled: %s, Finished: %s%s\n",
 			i+1, childType, child.Name, child.ID, traveled, finished, statusNote)
+
+		// 🆕 Show Result for finished nodes (Crucial for Loop iteration logic)
+		if child.WetherFinished && child.Result != "" {
+			info += fmt.Sprintf("     Result: %s\n", child.Result)
+		}
 	}
 
 	// 添加状态含义说明
@@ -687,13 +742,47 @@ func (r *Runtime) nodeToState(node *tasknode.TaskNode) llm.NodeState {
 		information = node.Information[0]
 	}
 
+	// 📍 DEFENSE: Clone and truncate variables to prevent token explosion
+	truncatedVars := make(map[string]interface{})
+	for k, v := range node.Variables {
+		switch val := v.(type) {
+		case string:
+			if len(val) > 1000 {
+				truncatedVars[k] = val[:1000] + "... [TRUNCATED]"
+			} else {
+				truncatedVars[k] = val
+			}
+		case []string:
+			// Limit history to last 10 entries and truncate each entry
+			limit := 10
+			start := 0
+			if len(val) > limit {
+				start = len(val) - limit
+			}
+			newSlice := []string{}
+			if start > 0 {
+				newSlice = append(newSlice, "... [EARLIER HISTORY REMOVED]")
+			}
+			for i := start; i < len(val); i++ {
+				s := val[i]
+				if len(s) > 1000 {
+					s = s[:1000] + "... [TRUNCATED]"
+				}
+				newSlice = append(newSlice, s)
+			}
+			truncatedVars[k] = newSlice
+		default:
+			truncatedVars[k] = v
+		}
+	}
+
 	return llm.NodeState{
 		ID:          node.ID,
 		Name:        node.Name,
 		Type:        nodeType,
 		Status:      status,
 		Information: information,
-		Variables:   node.Variables,
+		Variables:   truncatedVars,
 		Index:       node.Index,
 		Result:      node.Result,
 		IsImportant: node.IsImportant,
@@ -701,7 +790,7 @@ func (r *Runtime) nodeToState(node *tasknode.TaskNode) llm.NodeState {
 }
 
 // collectScopedVariables 收集从根节点到当前路径的所有变量（越靠近当前节点优先级越高）
-func (r *Runtime) collectScopedVariables(current *tasknode.TaskNode) map[string]interface{} {
+func (r *Runtime) CollectScopedVariables(current *tasknode.TaskNode) map[string]interface{} {
 	vars := make(map[string]interface{})
 	path := []*tasknode.TaskNode{}
 	node := current
@@ -765,7 +854,7 @@ func formatVariables(vars map[string]interface{}) string {
 }
 
 // executeAction 执行 LLM 返回的动作
-func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) error {
+func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) error {
 	switch action.ActionType {
 	case "create_node":
 		// 创建新节点
@@ -779,14 +868,22 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		}
 		return nil
 	case "mark_complete":
-		// 标记当前节点为完成
-		parent.MarkFinished()
+		parent.SingleFinished = true
 		if action.Result != "" {
 			parent.Result = action.Result
 		}
 		if action.IsImportant {
 			parent.IsImportant = true
 		}
+		if action.Variables != nil {
+			if parent.Variables == nil {
+				parent.Variables = make(map[string]interface{})
+			}
+			for k, v := range action.Variables {
+				parent.Variables[k] = v
+			}
+		}
+		fmt.Printf("  ✅ Action: mark_complete (Result: %s)\n", parent.Result)
 		return nil
 	case "update_variables":
 		// 更新当前节点的变量
@@ -807,7 +904,7 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 		return nil
 	case "execute_command":
 		fmt.Printf("💻 Executing command: %s\n", action.Command)
-		result, err := r.handleCLI(action.Command)
+		result, err := r.HandleCLI(action.Command)
 		if err != nil {
 			return fmt.Errorf("command execution failed: %w", err)
 		}
@@ -839,9 +936,9 @@ func (r *Runtime) executeAction(action llm.Action, parent *tasknode.TaskNode) er
 			}
 		}
 		history = append(history, histEntry)
-		// Keep last 20 commands to avoid context overflow
-		if len(history) > 20 {
-			history = history[len(history)-20:]
+		// Keep last 10 commands to avoid context overflow (more aggressive defense)
+		if len(history) > 10 {
+			history = history[len(history)-10:]
 		}
 		parent.Variables["command_output_history"] = history
 		return nil
@@ -914,7 +1011,7 @@ func (r *Runtime) collectGlobalAttention(node *tasknode.TaskNode) []NodeResult {
 	return results
 }
 
-func (r *Runtime) formatHistory() string {
+func (r *Runtime) FormatHistory() string {
 	// 从根节点开始全量扫描
 	root := r.cursor.GetRoot()
 	if root == nil {
@@ -982,7 +1079,7 @@ func (r *Runtime) formatHistory() string {
 	return sb.String()
 }
 
-func (r *Runtime) handleCLI(command string) (string, error) {
+func (r *Runtime) HandleCLI(command string) (string, error) {
 	if command == "" {
 		return "", fmt.Errorf("empty command")
 	}
@@ -1022,7 +1119,7 @@ func (r *Runtime) handleCLI(command string) (string, error) {
 
 // estimateTokenCount 估算文本的 Token 数量
 // 简单规则：英文约 4 字符 = 1 token，中文约 1.5 字符 = 1 token
-func estimateTokenCount(text string) int {
+func EstimateTokenCount(text string) int {
 	// 统计中文字符数量
 	chineseCount := 0
 	for _, r := range text {
@@ -1042,7 +1139,7 @@ func estimateTokenCount(text string) int {
 
 // printTokenStats 打印 Token 统计信息
 func (r *Runtime) printTokenStats(prompt string, contextLimit int) {
-	tokenCount := estimateTokenCount(prompt)
+	tokenCount := EstimateTokenCount(prompt)
 	percentage := float64(tokenCount) / float64(contextLimit) * 100
 
 	fmt.Printf("\n📊 Token Statistics:\n")
@@ -1087,11 +1184,25 @@ func nodeStatusStr(s tasknode.TaskStatus) string {
 // 根据 detail.md 的描述：
 // - 对于普通节点：如果 wethertraveled 是 1，则寻找下一个子节点；如果全部子节点 wethertraveled，就返回上级
 // - 对于 Loop 节点：检查子节点是否都 finished，如果 finished 就 pop 栈并跳出 loop
-// - 对于 Leaf 节点：执行完成后直接返回上级
+// - 对于 Leaf 节点：Agentic Loop（委派到 agentic_loop.go）
 func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
-	// For Leaf nodes: Move up. They originate WetherFinished via actions.
-	if current.Type == tasknode.Leaf {
-		r.cursor.MoveUp()
+	// 📍 Propagate variables to parent if parent is a Loop
+	if current.Parent != nil && current.Parent.Type == tasknode.Loop {
+		fmt.Printf("  🔄 Propagating state variables from child [%s] to Loop parent [%s]\n", current.ID, current.Parent.ID)
+		if current.Parent.Variables == nil {
+			current.Parent.Variables = make(map[string]interface{})
+		}
+		for k, v := range current.Variables {
+			// Skip ephemeral/scratchpad variables
+			if k == "command_output_history" || k == "last_command_result" {
+				continue
+			}
+			current.Parent.Variables[k] = v
+		}
+	}
+
+	// Agentic Loop: Delegate to agentic_loop.go
+	if r.HandleLeafAgenticLoop(current) {
 		return nil
 	}
 
@@ -1105,27 +1216,34 @@ func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
 			return nil
 		}
 
-		// 2. All children are finished. Check completion logic.
+		// 2. All children traveled. Check completion logic.
 		allFinished := current.AllChildrenFinished()
 
 		// Case: Loop node
 		if current.Type == tasknode.Loop {
-			if allFinished {
-				current.MarkFinished()
+			if current.WetherFinished {
+				// Loop explicitly marked finished by LLM
 				r.cursor.MoveUp()
 				return nil
 			}
-			// Loop not finished: reset children (traveled AND finished) and stay.
-			current.ResetChildrenStatus()
-			fmt.Printf("  🔄 Loop [%s] not finished, resetting children status for next iteration\n", current.ID)
-			return nil // Stay here to start next iteration
+			// Dynamic Loop: stay here, let LLM decide next iteration.
+			// 📍 STATE AGGREGATION: Accumulate variables from the LAST finished child.
+			if len(current.Children) > 0 {
+				lastChild := current.Children[len(current.Children)-1]
+				if lastChild.WetherFinished && lastChild.Variables != nil {
+					if current.Variables == nil {
+						current.Variables = make(map[string]interface{})
+					}
+					for k, v := range lastChild.Variables {
+						current.Variables[k] = v
+					}
+				}
+			}
+			return nil
 		}
 
 		// Case: Normal node
-		// According to user instructions: "all traveled才是完成了" (All traveled means completed).
-		// Pop Criteria: Move up once all children are traveled.
 		if current.AllChildrenTraveled() || len(current.Children) == 0 {
-			// Hierarchical Finished: Only mark finished if all children are finished.
 			if allFinished || len(current.Children) == 0 {
 				if !current.WetherFinished {
 					current.MarkFinished()
@@ -1184,4 +1302,13 @@ func (r *Runtime) GetCurrentNode() *tasknode.TaskNode {
 // IsDone 检查是否已完成
 func (r *Runtime) IsDone() bool {
 	return r.cursor.Done()
+}
+
+func (r *Runtime) hasUnfinishedChildren(node *tasknode.TaskNode) bool {
+	for _, child := range node.Children {
+		if !child.WetherFinished {
+			return true
+		}
+	}
+	return false
 }

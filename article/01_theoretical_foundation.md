@@ -133,7 +133,7 @@ F(loop_node) = (current_state = qₐ) ∨ (current_state = qᵣ)
 
 1. **状态保持**：LLMVM 的变量系统可以保存图灵机的完整状态
 2. **转移模拟**：每个图灵机转移对应一次 Loop 迭代
-3. **终止性**：图灵机停机 ⟺ Loop 节点标记为 finished
+3. **终止性**：图灵机停机 ⟺ root节点 all traveled
 
 **结论**：由于 LLMVM 可以模拟任意图灵机，因此 LLMVM 是图灵完备的。□
 
@@ -243,7 +243,6 @@ subject to Σᵢ size(nᵢ) ≤ C
 
 **局限性**：
 - 无法表示嵌套循环
-- 无变量作用域
 - 无任务分解
 
 **LLMVM 的优势**：

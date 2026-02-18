@@ -44,6 +44,27 @@ func (c *Cursor) MoveDown() bool {
 	return false
 }
 
+// MoveFirstUnfinishedChild 向下移动到第一个未完成的子节点（无论是否已遍历）
+func (c *Cursor) MoveFirstUnfinishedChild() bool {
+	if c.Current == nil {
+		return false
+	}
+
+	for _, child := range c.Current.Children {
+		if !child.WetherFinished {
+			// 如果当前节点是 Loop 节点，且不在栈顶，将其推入栈
+			if c.Current.Type == tasknode.Loop {
+				if len(c.LoopStack) == 0 || c.LoopStack[len(c.LoopStack)-1] != c.Current {
+					c.LoopStack = append(c.LoopStack, c.Current)
+				}
+			}
+			c.Current = child
+			return true
+		}
+	}
+	return false
+}
+
 // MoveUp 向上返回到父节点
 func (c *Cursor) MoveUp() bool {
 	if c.Current == nil || c.Current.Parent == nil {
