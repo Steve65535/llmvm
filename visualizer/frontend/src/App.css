@@ -1,0 +1,272 @@
+/* ... */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f0f2f5;
+  color: #333;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+header {
+  padding: 1rem 2rem;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 10;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #1890ff;
+}
+
+.error {
+  color: #ff4d4f;
+  font-weight: bold;
+}
+
+
+/* --- Tree Layout (Clean Flexbox Org Chart) --- */
+
+/* Wrapper for the entire diagram */
+.tree-canvas {
+  flex: 1;
+  overflow: auto;
+  padding: 3rem;
+  /* Key to centering an inline-flex diagram horizontally */
+  text-align: center;
+}
+
+/* Recursive node structure */
+.node-container {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: top;
+  margin: 0 10px;
+  position: relative;
+  /* Space for the vertical line dropping from parent */
+  padding-top: 20px;
+}
+
+/* We don't want lines drawn above the absolute root node */
+.tree-canvas>.node-container {
+  padding-top: 0;
+}
+
+.tree-canvas>.node-container::before,
+.tree-canvas>.node-container::after {
+  display: none;
+}
+
+/* Container for all child nodes of a given parent */
+.children-container {
+  display: flex;
+  flex-direction: row;
+  /* STRICTLY ROW */
+  flex-wrap: nowrap;
+  /* STRICTLY NO WRAP */
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 20px;
+  position: relative;
+}
+
+/* --- Connecting Lines --- */
+
+/* 1. Downward line from Parent's box to the Children Container's top edge */
+.children-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 20px;
+  border-left: 2px solid #ccc;
+  transform: translateX(-50%);
+}
+
+/* 2. Horizontal line segment that sits on TOP of each sibling */
+/* Right half for the first child */
+.children-container>.node-container:first-child::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 50%;
+  height: 20px;
+  border-top: 2px solid #ccc;
+}
+
+/* Left half for the last child */
+.children-container>.node-container:last-child::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 20px;
+  border-top: 2px solid #ccc;
+}
+
+/* Full width for all middle children */
+.children-container>.node-container:not(:first-child):not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 20px;
+  border-top: 2px solid #ccc;
+}
+
+/* If there is exactly ONE child, no horizontal lines needed */
+.children-container>.node-container:only-child::before {
+  display: none;
+}
+
+/* 3. Vertical line dropping down from the horizontal line to the sibling node's box */
+.children-container>.node-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 20px;
+  border-left: 2px solid #ccc;
+  transform: translateX(-50%);
+}
+
+
+/* --- Node Box Appearance --- */
+
+.node-box {
+  background: white;
+  border: 2px solid #d9d9d9;
+  border-radius: 8px;
+  width: 220px;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease-in-out;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  position: relative;
+  z-index: 5;
+}
+
+.node-box:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1) !important;
+}
+
+.node-header {
+  height: 8px;
+  border-radius: 6px 6px 0 0;
+  width: 100%;
+}
+
+.node-body {
+  padding: 12px;
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  gap: 4px;
+}
+
+.node-body strong {
+  color: #262626;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-type {
+  font-size: 0.8rem;
+  color: #8c8c8c;
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  align-self: flex-start;
+}
+
+.node-result {
+  font-size: 0.75rem;
+  color: #ff4d4f;
+  margin-top: 4px;
+  background: #fff1f0;
+  border: 1px solid #ffa39e;
+  padding: 4px;
+  border-radius: 4px;
+  word-wrap: break-word;
+}
+
+/* Cursor Pulse Animation */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.7);
+  }
+
+  70% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 10px rgba(24, 144, 255, 0);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0);
+  }
+}
+
+.cursor-pulse {
+  animation: pulse 2s infinite;
+  border-width: 3px !important;
+}
+
+/* Settings Tooltip */
+.tooltip {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  width: 400px;
+  max-height: calc(100vh - 100px);
+  background: white;
+  border-left: 4px solid #1890ff;
+  box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 1.5rem;
+  overflow-y: auto;
+  border-radius: 4px;
+  z-index: 100;
+  text-align: left;
+}
+
+.tooltip h3 {
+  margin-top: 0;
+  color: #1890ff;
+  border-bottom: 1px solid #f0f0f0;
+  padding-bottom: 8px;
+}
+
+.tooltip-section {
+  margin-top: 1rem;
+}
+
+.tooltip pre {
+  background: #f5f5f5;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

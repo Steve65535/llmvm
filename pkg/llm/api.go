@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // OpenAI Compatible Structures
@@ -55,8 +57,11 @@ func NewAPIEngine(url string, model string, header map[string]string) *APIEngine
 	}
 }
 
-// NewDeepSeekEngine 创建 DeepSeek 专用引擎
-func NewDeepSeekEngine() (*APIEngine, error) {
+// NewLLMEngine 创建通用的 LLM 引擎（默认使用 DeepSeek）
+func NewLLMEngine() (*APIEngine, error) {
+	// 静默加载本目录或项目根目录下的 .env 文件
+	_ = godotenv.Load(".env")
+
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("DEEPSEEK_API_KEY environment variable is not set")

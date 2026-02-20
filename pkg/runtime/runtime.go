@@ -33,6 +33,7 @@ type Runtime struct {
 	// Stagnation Detection
 	lastResponse    string // Store last LLM response text
 	stagnationCount int    // Counter for identical repeated responses
+	lastNodeID      string // 🔧 FIX(Defect 5): Track current node to reset stagnation on node change
 
 	// OnStepComplete is called after each node execution step
 	OnStepComplete func(*tasknode.TaskNode)
@@ -76,6 +77,13 @@ func (r *Runtime) Execute(initialRequest string) error {
 			break
 		}
 
+		// 🔧 FIX(Defect 5): 节点切换时重置 Stagnation 检测
+		if current.ID != r.lastNodeID {
+			r.lastResponse = ""
+			r.stagnationCount = 0
+			r.lastNodeID = current.ID
+		}
+
 		// 📍 IMPROVEMENT(v10/v11): Global Skip logic
 		if current.WetherFinished {
 			if err := r.decideNextStep(current); err != nil {
@@ -86,20 +94,19 @@ func (r *Runtime) Execute(initialRequest string) error {
 
 		if current.WetherTraveled {
 			if current.Type == tasknode.Normal || current.Type == tasknode.Loop {
-				// 如果有未完成的子节点，优先深入处理子节点，而不是呼叫 LLM
-				if r.hasUnfinishedChildren(current) {
-					if r.cursor.MoveFirstUnfinishedChild() {
-						continue
-					}
-				}
-				// 对于 Normal 节点，如果子节点已全部遍历（且没被标记为 Finished），则认为该节点逻辑结束。
-				if current.Type == tasknode.Normal {
+				// 获取下一个未遍历的子节点
+				nextChild := current.GetNextUntraveledChild()
+				if nextChild != nil {
+					// 还有未遍历的子节点，向下移动游标
+					r.cursor.MoveDown()
+					continue
+				} else {
+					// 所有已知的子节点都遍历过（不管完成与否），交由 decideNextStep 判断是否结束循环或继续
 					if err := r.decideNextStep(current); err != nil {
 						return err
 					}
 					continue
 				}
-				// 对于 Loop 节点，如果所有已知子节点已完成，允许再次 callLLM 决定是否有下一轮
 			}
 		}
 
@@ -159,8 +166,17 @@ func (r *Runtime) Execute(initialRequest string) error {
 			// 📍 Stagnation Detection: Detect identical repeated responses
 			if output.Response == r.lastResponse {
 				r.stagnationCount++
-				fmt.Printf("  ⚠️  Stagnation Detected (Level %d/3) for node [%s]\n", r.stagnationCount, current.ID)
-				if r.stagnationCount >= 2 {
+				fmt.Printf("  ⚠️  Stagnation Detected (Level %d/4) for node [%s]\n", r.stagnationCount, current.ID)
+				if r.stagnationCount >= 4 {
+					fmt.Printf("  🚨 CRITICAL STAGNATION: LLM is stuck repeating itself. Forcing node failure.\n")
+					current.Status = tasknode.Failed
+					current.Result = "Error: Critical Stagnation - LLM repeated the exact same response 4 times."
+					// Break out of the retry loop completely
+					if err := r.decideNextStep(current); err != nil {
+						return err
+					}
+					break
+				} else if r.stagnationCount >= 2 {
 					lastErr = fmt.Errorf("STAGNATION_DETECTED: You are repeating your previous response exactly. Break the loop! Change your strategy or create a new node to progress. Do not repeat the same observation command.")
 					retryCount++
 					continue
@@ -194,9 +210,11 @@ func (r *Runtime) Execute(initialRequest string) error {
 					fmt.Printf("⚠️ Max retries (%d) reached for node [%s]. Marking as Failed and continuing...\n", current.MaxRetries, current.ID)
 					current.Status = tasknode.Failed
 					current.Result = fmt.Sprintf("Error: Maximum retries reached. Last error: %v", lastErr)
+					// 🔧 FIX(Defect 2): 内层已调用 decideNextStep，标记跳过外层的调用
 					if err := r.decideNextStep(current); err != nil {
 						return err
 					}
+					// Break out of the retry loop
 					break
 				}
 				continue
@@ -211,14 +229,27 @@ func (r *Runtime) Execute(initialRequest string) error {
 			break
 		}
 
-		// 🆕 执行回调（用于持久化等）
-		if r.OnStepComplete != nil {
-			r.OnStepComplete(current)
+		// 如果是因为 API 或解析、停滞引起的 retryCount 耗尽，并且仍然没有成功 action
+		if retryCount > maxRetries && current.Status != tasknode.Failed {
+			fmt.Printf("⚠️ Max LLM API retries (%d) reached for node [%s]. Marking as Failed and continuing...\n", maxRetries, current.ID)
+			current.Status = tasknode.Failed
+			current.Result = fmt.Sprintf("Error: Maximum LLM/API retries reached. Last error: %v", lastErr)
+		}
+
+		// 🔧 FIX(Defect 2): 如果节点已经 Failed（在重试循环中处理过），跳过外层的 decideNextStep
+		if current.Status == tasknode.Failed {
+			goto stepDone
 		}
 
 		// 5. 决定下一步：下树还是上树
 		if err := r.decideNextStep(current); err != nil {
 			return fmt.Errorf("failed to decide next step: %w", err)
+		}
+
+	stepDone:
+		// 🆕 执行回调（用于持久化等）
+		if r.OnStepComplete != nil {
+			r.OnStepComplete(current)
 		}
 		fmt.Println()
 	}
@@ -390,6 +421,35 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 			currentLoop.Name, currentLoop.ID, currentLoop.AllChildrenFinished())
 	} else {
 		loopInfo = "Not currently in a Loop"
+	}
+
+	// 🆕 Inject Agentic Loop Context for Leaf nodes
+	if current.Type == tasknode.Leaf && current.IterationCount > 0 {
+		loopInfo += fmt.Sprintf(`
+> [!IMPORTANT]
+> **AGENTIC LOOP ACTIVE (Iteration %d/%d)**
+> You are currently in an autonomous refinement loop for this Leaf node.
+>
+> **Status**:
+> - You have already executed commands in previous turns.
+> - You are NOT done yet (otherwise you would have called 'mark_complete').
+> - If you have completed the goal based on previous observations, you MUST call 'mark_complete' now.
+> - If the previous attempt failed or was insufficient, analyze the 'Command Execution History' below and try a DIFFERENT approach.
+> - DO NOT repeat the same ineffective command.`, current.IterationCount+1, current.MaxRetries)
+	}
+
+	// 🆕 Inject Reflection Context for Loop nodes
+	if current.Type == tasknode.Loop && !current.WetherTraveled && len(current.Variables) > 0 {
+		loopInfo += `
+> [!CAUTION] 
+> **REFLECTION MODE ALIVE**
+> You are re-evaluating this Loop node because the previous iteration did NOT finish all children successfully (some children failed or didn't meet the loop exit condition).
+> 
+> **Your Reflection Task**:
+> 1. **Analyze**: Read the 'Scoped Variables' below (especially 'last_error', 'command_output_history', or loop counters). Identify EXACTLY why the previous iteration failed or fell short.
+> 2. **Clean up**: Use 'update_variables' action to clear out stale variables (like old errors or temporary flags) by setting them to empty strings or null equivalents, so they don't pollute the next run.
+> 3. **Mutate AST**: You MUST output 'create_node' to regenerate the child nodes required for the next iteration (e.g., if you were processing index 5, create nodes to process index 6), OR create a specific error-handling node.
+> 4. Do NOT just repeat the exact same child nodes that just failed.`
 	}
 
 	// 构建请求结构
@@ -1221,14 +1281,27 @@ func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
 
 		// Case: Loop node
 		if current.Type == tasknode.Loop {
-			if current.WetherFinished {
-				// Loop explicitly marked finished by LLM
+			if allFinished {
+				// Loop explicitly marked finished because all children are finished
+				if !current.WetherFinished {
+					current.MarkFinished()
+				}
 				r.cursor.MoveUp()
 				return nil
-			}
-			// Dynamic Loop: stay here, let LLM decide next iteration.
-			// 📍 STATE AGGREGATION: Accumulate variables from the LAST finished child.
-			if len(current.Children) > 0 {
+			} else {
+				// 🔴 LOOP CONTINUATION / REFLECTION LOGIC
+				// Only reset if there are actually children. If there are 0 children,
+				// we shouldn't infinitely loop here without doing anything.
+				if len(current.Children) == 0 {
+					fmt.Printf("  ⚠️ Loop node [%s] has no children. Forcing completion to prevent infinite loop.\n", current.ID)
+					current.MarkFinished()
+					r.cursor.MoveUp()
+					return nil
+				}
+
+				fmt.Printf("  🔄 Loop node [%s] evaluates to continue (Not all children finished). Triggering reflection.\n", current.ID)
+
+				// 📍 STATE AGGREGATION: Accumulate variables from the LAST finished child (Optional but helpful)
 				lastChild := current.Children[len(current.Children)-1]
 				if lastChild.WetherFinished && lastChild.Variables != nil {
 					if current.Variables == nil {
@@ -1238,8 +1311,18 @@ func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
 						current.Variables[k] = v
 					}
 				}
+
+				// Reset children statuses so the cursor travels through them again next iteration
+				current.ResetChildrenStatus()
+
+				// 💥 TRIGER REFLECTION: Mark loop node itself as untraveled
+				// According to reflection.md: "if (node.wethertraveled == false) AND (node.variables != empty): -> 触发反思"
+				current.WetherTraveled = false
+
+				// We DO NOT MOVE CURSOR. Next iteration of main Run Loop will pick this node up,
+				// see it's untraveled, but has variables, and will call LLM to reflect and modify AST.
+				return nil
 			}
-			return nil
 		}
 
 		// Case: Normal node

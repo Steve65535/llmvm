@@ -25,12 +25,12 @@ func main() {
 
 	// 1. 初始化 LLM 引擎
 	var engine llm.Engine
-	apiEngine, err := llm.NewDeepSeekEngine()
+	apiEngine, err := llm.NewLLMEngine()
 	if err != nil {
-		fmt.Println("⚠️  Warning: DeepSeek API not available, using StubEngine for testing")
+		fmt.Println("⚠️  Warning: LLM API not available, using StubEngine for testing")
 		engine = &llm.StubEngine{}
 	} else {
-		fmt.Println("✅ DeepSeek API initialized successfully")
+		fmt.Println("✅ LLM Engine initialized successfully")
 		engine = apiEngine
 	}
 
@@ -48,7 +48,12 @@ func main() {
 			log.Fatalf("❌ Failed to unmarshal state: %v", err)
 		}
 		root.RestoreParents()
-		initialRequest = root.Information[0] // 假设第一个 info 是原始请求
+		// 🔧 FIX(Defect 4): 防止 Information 为空时越界 panic
+		if len(root.Information) > 0 {
+			initialRequest = root.Information[0]
+		} else {
+			log.Fatalf("❌ Loaded state has no initial request in root.Information")
+		}
 		fmt.Println("✅ State loaded successfully")
 	} else {
 		// 获取用户命令

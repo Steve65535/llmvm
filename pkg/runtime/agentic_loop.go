@@ -13,6 +13,17 @@ func (r *Runtime) HandleLeafAgenticLoop(current *tasknode.TaskNode) bool {
 		return false
 	}
 
+	// 🔧 FIX(Defect 3): 如果节点已经 Failed 或 Finished，强制完成并上移，防止死循环
+	if current.Status == tasknode.Failed || current.WetherFinished {
+		fmt.Printf("  ❌ Leaf [%s] is Failed/Finished, forcing MoveUp\n", current.ID)
+		r.clearLeafScratchpad(current)
+		if !current.WetherFinished {
+			current.MarkFinished()
+		}
+		r.cursor.MoveUp()
+		return true
+	}
+
 	if current.SingleFinished {
 		// LLM 明确说“我做完了” (mark_complete)
 		fmt.Printf("  ✅ Leaf [%s] marked complete by LLM, cleaning up scratchpad and popping\n", current.ID)
@@ -24,9 +35,16 @@ func (r *Runtime) HandleLeafAgenticLoop(current *tasknode.TaskNode) bool {
 
 	// 安全阀：MaxRetries (防止 Leaf 节点陷入死循环)
 	if current.IterationCount >= current.MaxRetries {
-		fmt.Printf("  ⚠️ Leaf [%s] hit max retries (%d), forcing completion\n", current.ID, current.MaxRetries)
+		fmt.Printf("  ⚠️ Leaf [%s] hit max retries (%d), marking Failed\n", current.ID, current.MaxRetries)
 		r.clearLeafScratchpad(current)
-		current.MarkFinished()
+
+		// 🔴 FIX: DO NOT call MarkFinished() here. If it failed, it is NOT finished.
+		// Faking 'Finished' causes parent Loops to exit prematurely.
+		if current.Status != tasknode.Failed {
+			current.Status = tasknode.Failed
+			current.Result = "Error: Maximum Agentic Loop retries reached"
+		}
+
 		r.cursor.MoveUp()
 		return true
 	}

@@ -33,10 +33,9 @@ api: [HIDDEN_FOR_SECURITY_SEE_ENV]
    ```
 
 2. **启动程序**:
-   使用 `env` 命令加载环境变量并运行：
+   直接使用 `go run` 运行（已内置 `.env` 自动加载机制）：
    ```bash
-   # 加载 .env 并运行 (Linux/macOS)
-   export $(cat .env | xargs) && go run cmd/main.go -save ecom_3d_site.json "创建一个3d视觉效果的网站 是一个跨境电商网站 严格遵循软件工程流程执行"
+   go run cmd/main.go -save ecom_3d_site.json "创建一个3d视觉效果的网站 是一个跨境电商网站 严格遵循软件工程流程执行"
    ```
 
 ---
@@ -321,36 +320,56 @@ F(n) = F(n-1) + F(n-2)
 
 ---
 
-## 🔢 实验 2：哥德巴赫猜想 (The Goldbach Loop)
+## 🚀 终极杀手级实验：The Deep Compiler (深渊编译器)
 
-这是一个 **"无法作弊 (Uncheatable)"** 的计算任务。
-与 `find` 文件不同，这个任务的目标是**动态计算**出来的。没有捷径，只有硬抗计算量。
+这是一个专门设计用来**彻底摧毁传统 CoT (Chain of Thought) 和 ReAct 架构**的实验。
+传统的 Agent 面对稍微扁平的任务可以通过堆叠上下文来解决，但如果面对一个**必须经过 5 层不同抽象层级转换、包含横向依赖与数百个微节点的长序列生成系统**，上下文窗口会瞬间崩溃并引发严重幻觉。
 
 **测试命令**:
 ```bash
-export $(cat .env | xargs) && go run cmd/main.go -save goldbach_test.json "
-# 任务：哥德巴赫猜想验证 (The Goldbach Loop)
+go run cmd/main.go -save deep_compiler.json "
+# 任务：编写并自举一个极简编译器 (The Deep Compiler)
 
 ## 目标
-验证哥德巴赫猜想对于 **4 到 1000** 之间的所有偶数都成立。
-(哥德巴赫猜想：任一大于 2 的偶数都可写成两个质数之和。)
+你要在 'test/sandbox/compiler' 目录下，从零实现一门叫 'Tarpit' 的极简编程语言的完整编译工具链。
 
-## 规则 (Strict Constraints)
-1. **必须使用 Loop 节点**：你不能在一个步骤里验证所有数字。你必须创建一个 Loop 节点，通过迭代来逐个验证。
-2. **拒绝批处理**：不要写一个 Python 脚本一次性跑完。因为我们要测试的是 **LLMVM 的长时间无状态推理能力**，而不是 Python 的计算能力。你必须让 LLM 来控制循环。
-3. **记录证据**：对于每一个偶数 n，你必须找到两个质数 p1, p2，并在 'test/sandbox/goldbach_results.txt' 中追加一行记录：
-   Example: '10 = 3 + 7'
-4. **验证逻辑**：
-   - 检查 n 是否为偶数。
-   - 寻找 p1, p2。
-   - 验证 p1, p2 是否为质数。
-   - 验证 p1 + p2 == n。
-   - 写入文件。
-   - 继续下一个偶数。
+## 极端分解要求 (The CoT Killer)
+你**绝对不能**在一个节点里写完全部代码，你必须严格按照计算机科学的抽象层级，构建深达 5 层的 AST (抽象语法树)，每层至少包含 3 个并行的子模块处理阶段：
 
-## 为什么这对你很难？
-- 你需要进行约 500 次推理迭代。
-- 如果你是传统的 CoT，跑到第 50 个数字时，Context 就会爆炸。
-- 你必须展示如何利用 **Pop Stack** 来保持大脑并在数千步操作后依然保持清醒。
+1. **第一层：词法分析器 (Lexer)**
+   - 子节点 A：定义 Token 数据结构 (types.go)
+   - 子节点 B：编写正则表达式和词法切分逻辑 (lexer.go)
+   - 子节点 C：编写单元测试 (lexer_test.go)，并通过 Agentic Loop 保证编译通过。
+
+2. **第二层：语法分析器 (Parser) [必须依赖第一层输出]**
+   - 子节点 A：定义 AST 节点数据结构 (ast.go)
+   - 子节点 B：编写递归下降解析逻辑 (parser.go)
+   - 子节点 C：要求你写一个测试，读取第一层的 Token 列表并输出 JSON AST。
+
+3. **第三层：语义分析与类型检查 (Semantic Checker)**
+   - 必须读取第二层生成的 AST 结构，编写遍历检查代码。
+
+4. **第四层：目标代码生成器 (Code Generator)**
+   - 将验证过的 AST 转换成等效的 Python 或 C 代码字符串。
+
+5. **第五层：端到端自举验证 (End-to-End Bootstrapping)**
+   - 写一个 Tarpit 语言的测试脚本 'hello.tarpit'：打印 1 到 100 的质数。
+   - 用你刚才写好的 Lexer -> Parser -> Generator 完整编译它。
+   - 运行生成的 Python/C 代码，验证输出。
+
+## 为什么这能秒杀传统大模型框架？
+1. **上下文遗忘 (Context Amnesia)**：当大模型走到第 4 层 (代码生成) 时，传统 CoT 早就忘记了第 1 层的 Token 结构名字。而你必须利用 LLMVM 的 **Scoped Variables** 把接口契约像寄存器一样传递给第 4 层。
+2. **深度控制流 (Deep Control Flow)**：你不仅是在写代码，你是在构建一棵长达一百多步的逻辑执行树。任何一步出现编译错误，触发 Reflection 和回溯时，引擎不能发生状态污染。
+3. **隔离度测试**：证明 LLM 可以在每次只看到局部问题（Stateless）的苛刻条件下，精密地拼装出一个工业级的巨型齿轮集合。
 "
 ```
+
+## 总结
+
+LLMVM 不仅仅是另一个 Agent，它是 AGI 时代的 **语义内核 (Semantic Kernel)**。
+
+通过将 LLM 限制在 $O(1)$ 的单步预测中，而将 $O(N)$ 的复杂性交给确定性的状态机（Runtime），我们实际上开启了**以语义为原材料的工业化软件生产**的可能性。
+
+---
+
+(c) 2026 Steve65535 & Antigravity
