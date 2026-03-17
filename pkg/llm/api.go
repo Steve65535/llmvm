@@ -78,7 +78,7 @@ func NewLLMEngine() (*APIEngine, error) {
 
 // 同步调用
 func (e *APIEngine) Call(prompt string) (*Output, error) {
-	systemPrompt := `You are the Arithmetic Logic Unit (ALU) of LLMVM, a Turing-complete virtual machine.
+	systemPrompt := `You are the Arithmetic Logic Unit (ALU) of LLMVM, a virtual machine for LLM-driven task execution.
 Your role is to process semantic state and return structured actions for the Go-based CPU (Runtime) to execute.
 
 ## Key Principles

@@ -1,10 +1,10 @@
 # LLMVM (LLM Virtual Machine)
 
-**LLMVM** is a Turing-Complete Agent Runtime that fundamentally reimagines how Large Language Models (LLMs) execute complex tasks. Instead of the traditional "Chain of Thought" loop, LLMVM acts as a semantic state machine that dynamically constructs and executes a dedicated Program Syntax Tree (AST) for each task.
+**LLMVM** is an advanced Agent Runtime that fundamentally reimagines how Large Language Models (LLMs) execute complex tasks. Instead of the traditional "Chain of Thought" loop, LLMVM acts as a semantic state machine that dynamically constructs and executes a dedicated Program Syntax Tree (AST) for each task.
 
 ## 🚀 Key Highlights
 
-*   **True Turing Completeness**: Unlike standard Agents that rely on probabilistic loops, LLMVM implements explicit control flow structures.
+*   **Explicit Control Flow**: Unlike standard Agents that rely on probabilistic loops, LLMVM implements explicit control flow structures.
     *   **Loop Nodes**: Managed by a dedicated runtime stack, ensuring cyclic logic is executed faithfully until exit conditions are met.
     *   **DFS Execution**: Uses Depth-First Search for task execution, mimicking the call stack of a compiled program rather than a flat list of actions.
 

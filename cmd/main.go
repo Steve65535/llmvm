@@ -63,7 +63,7 @@ func main() {
 			command = strings.Join(args, " ")
 			fmt.Printf("📝 Command from arguments: %s\n\n", command)
 		} else {
-			fmt.Println("🚀 LLMVM - Turing Complete Agent Runtime")
+			fmt.Println("🚀 LLMVM - Advanced Agent Runtime")
 			fmt.Println("==========================================")
 			fmt.Println("Enter your command (or 'exit' to quit):")
 			fmt.Print("> ")

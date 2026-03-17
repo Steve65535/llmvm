@@ -32,3 +32,7 @@ go.work
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Documentation and research materials (not for open source)
+markdown/
+article/

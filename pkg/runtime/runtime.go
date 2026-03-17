@@ -22,7 +22,7 @@ const (
 	MaxVariableDumpLength  = 8000
 )
 
-// Runtime 是图灵完备的 LLM 运行时引擎
+// Runtime 是 LLM 运行时引擎
 type Runtime struct {
 	engine      llm.Engine
 	cursor      *cursor.Cursor
