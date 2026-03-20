@@ -41,3 +41,7 @@ Thumbs.db
 # Documentation and research materials (not for open source)
 markdown/
 article/
+
+# Local agent guidance files
+AGENTS.md
+CLAUDE.md

@@ -12,10 +12,17 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Steve65535/llmvm/pkg/artifact"
 	"github.com/Steve65535/llmvm/pkg/llm"
 	"github.com/Steve65535/llmvm/pkg/runtime"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 )
+
+// SaveState 持久化格式：包含任务树 + artifact store
+type SaveState struct {
+	Root      *tasknode.TaskNode `json:"root"`
+	Artifacts *artifact.Store    `json:"artifacts,omitempty"`
+}
 
 func main() {
 	// 0. 解析命令行参数
@@ -36,6 +43,7 @@ func main() {
 
 	var root *tasknode.TaskNode
 	var initialRequest string
+	var savedArtifacts *artifact.Store
 
 	// 2. 加载或创建初始状态
 	if *loadPath != "" {
@@ -44,8 +52,15 @@ func main() {
 		if err != nil {
 			log.Fatalf("❌ Failed to read save file: %v", err)
 		}
-		if err := json.Unmarshal(data, &root); err != nil {
-			log.Fatalf("❌ Failed to unmarshal state: %v", err)
+		var state SaveState
+		if err := json.Unmarshal(data, &state); err != nil {
+			// 向后兼容：尝试直接解析为 TaskNode
+			if err2 := json.Unmarshal(data, &root); err2 != nil {
+				log.Fatalf("❌ Failed to unmarshal state: %v", err)
+			}
+		} else {
+			root = state.Root
+			savedArtifacts = state.Artifacts
 		}
 		root.RestoreParents()
 		// 🔧 FIX(Defect 4): 防止 Information 为空时越界 panic
@@ -87,12 +102,24 @@ func main() {
 	// 3. 创建运行时并执行
 	rt := runtime.NewRuntime(engine, root)
 
+	// 恢复 artifact store（如果从保存点加载）
+	if savedArtifacts != nil {
+		rt.SetArtifacts(savedArtifacts)
+		fmt.Println("✅ Artifact store restored")
+	}
+
+	// 保存辅助函数
+	saveState := func(path string) {
+		state := SaveState{Root: root, Artifacts: rt.GetArtifacts()}
+		data, _ := json.MarshalIndent(state, "", "  ")
+		ioutil.WriteFile(path, data, 0644)
+	}
+
 	// 🆕 增量保存支持
 	if *savePath != "" {
 		rt.OnStepComplete = func(node *tasknode.TaskNode) {
 			fmt.Printf("💾 Autosaving state to %s...\n", *savePath)
-			data, _ := json.MarshalIndent(root, "", "  ")
-			ioutil.WriteFile(*savePath, data, 0644)
+			saveState(*savePath)
 		}
 	}
 
@@ -103,8 +130,7 @@ func main() {
 		<-sigChan
 		fmt.Println("\n⚠️  Interrupted. Performing emergency save...")
 		if *savePath != "" {
-			data, _ := json.MarshalIndent(root, "", "  ")
-			ioutil.WriteFile(*savePath, data, 0644)
+			saveState(*savePath)
 			fmt.Printf("✅ State saved to %s. Exiting.\n", *savePath)
 		}
 		os.Exit(0)
@@ -119,12 +145,8 @@ func main() {
 	// 4. 如果指定了保存路径，则持久化
 	if *savePath != "" {
 		fmt.Printf("💾 Saving state to %s...\n", *savePath)
-		data, _ := json.MarshalIndent(root, "", "  ")
-		if err := ioutil.WriteFile(*savePath, data, 0644); err != nil {
-			fmt.Printf("❌ Failed to save state: %v\n", err)
-		} else {
-			fmt.Println("✅ State saved successfully")
-		}
+		saveState(*savePath)
+		fmt.Println("✅ State saved successfully")
 	}
 
 	// 5. 打印结果树

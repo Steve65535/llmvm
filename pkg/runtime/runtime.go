@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Steve65535/llmvm/pkg/artifact"
 	"github.com/Steve65535/llmvm/pkg/cursor"
 	"github.com/Steve65535/llmvm/pkg/llm"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
@@ -29,11 +30,15 @@ type Runtime struct {
 	initialReq  string
 	nodeCounter int // 全局节点计数器
 	vfs         *vfs.VirtualFileSystem
+	artifacts   *artifact.Store
 
 	// Stagnation Detection
 	lastResponse    string // Store last LLM response text
 	stagnationCount int    // Counter for identical repeated responses
 	lastNodeID      string // 🔧 FIX(Defect 5): Track current node to reset stagnation on node change
+
+	// Sliding Window Compression (0=full, 1=no workspace, 2=history≤5, 3=history≤2, 4=minimal)
+	compressionLevel int
 
 	// OnStepComplete is called after each node execution step
 	OnStepComplete func(*tasknode.TaskNode)
@@ -47,6 +52,7 @@ func NewRuntime(engine llm.Engine, root *tasknode.TaskNode) *Runtime {
 		cursor:      cursor.New(root),
 		nodeCounter: 0,
 		vfs:         vfsInstance,
+		artifacts:   artifact.New(),
 	}
 }
 
@@ -62,26 +68,23 @@ func (r *Runtime) Execute(initialRequest string) error {
 	// 	r.cursor.Current.MarkTraveled()
 	// }
 
-	// 主循环：深度优先搜索
-	maxIterations := 1000 // 防止无限循环
+	// 主循环：深度优先搜索（无上限，依赖停滞检测作为安全阀）
 	iteration := 0
 
 	for !r.cursor.Done() {
 		iteration++
-		if iteration > maxIterations {
-			return fmt.Errorf("maximum iterations (%d) reached, possible infinite loop", maxIterations)
-		}
 
 		current := r.cursor.Current
 		if current == nil {
 			break
 		}
 
-		// 🔧 FIX(Defect 5): 节点切换时重置 Stagnation 检测
+		// 🔧 FIX(Defect 5): 节点切换时重置 Stagnation 检测 + 压缩级别
 		if current.ID != r.lastNodeID {
 			r.lastResponse = ""
 			r.stagnationCount = 0
 			r.lastNodeID = current.ID
+			r.compressionLevel = 0
 		}
 
 		// 📍 IMPROVEMENT(v10/v11): Global Skip logic
@@ -114,17 +117,8 @@ func (r *Runtime) Execute(initialRequest string) error {
 		fmt.Printf("📍 Step %d: Processing node [%s] %s (Type: %v, Traveled: %v, Finished: %v)\n",
 			iteration, current.ID, current.Name, current.Type, current.WetherTraveled, current.WetherFinished)
 
-		// --- PASS 1: Attention Selection ---
-		// ... (rest of the prompt building and LLM call logic) ...
-		selectedNodeIDs := []string{}
-		if iteration > 0 {
-			ids, err := r.selectAttentionNodes(current, initialRequest)
-			if err != nil {
-				fmt.Printf("  ⚠️ Attention selection failed (skipping): %v\n", err)
-			} else {
-				selectedNodeIDs = ids
-			}
-		}
+		// --- Global Context (替代旧的 Attention Selection LLM 调用) ---
+		globalContext := r.buildGlobalContext(current)
 
 		// ... (Main LLM Call and Action Execution) ...
 		var response *llm.Response
@@ -134,7 +128,7 @@ func (r *Runtime) Execute(initialRequest string) error {
 
 		for retryCount <= maxRetries {
 			// ... (Prompt building, LLM Call, Parsing, Action Execution) ...
-			prompt, err := r.buildPromptWithWorkspace(current, initialRequest, selectedNodeIDs, lastErr)
+			prompt, err := r.buildPromptWithGlobalContext(current, initialRequest, globalContext, lastErr)
 			if err != nil {
 				return fmt.Errorf("failed to build prompt: %w", err)
 			}
@@ -152,6 +146,18 @@ func (r *Runtime) Execute(initialRequest string) error {
 
 			output, err := r.engine.Call(prompt)
 			if err != nil {
+				if isContextOverflow(err) {
+					const maxCompressionLevel = 4
+					if r.compressionLevel >= maxCompressionLevel {
+						// 已压缩到极限仍溢出，说明根因不在历史数据，按普通错误处理
+						lastErr = fmt.Errorf("context overflow persists at max compression (level %d): %w", r.compressionLevel, err)
+						retryCount++
+						continue
+					}
+					r.compressionLevel++
+					fmt.Printf("  🗜️  Context overflow detected, escalating compression to level %d\n", r.compressionLevel)
+					continue
+				}
 				lastErr = fmt.Errorf("LLM call failed: %w", err)
 				retryCount++
 				continue
@@ -258,76 +264,186 @@ func (r *Runtime) Execute(initialRequest string) error {
 
 // buildPrompt 构建 stateless prompt（不包含历史上下文）
 func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryError error) (string, error) {
-	return r.buildPromptInternal(current, request, nil, retryError)
+	return r.buildPromptInternalV2(current, request, "", retryError)
 }
 
-// buildPromptWithWorkspace 是 buildPrompt 的包装，支持传入 selectedNodeIDs
+// buildPromptWithGlobalContext 使用 Runtime 自动组装的全局上下文
+func (r *Runtime) buildPromptWithGlobalContext(current *tasknode.TaskNode, request string, globalContext string, retryError error) (string, error) {
+	return r.buildPromptInternalV2(current, request, globalContext, retryError)
+}
+
+// buildPromptWithWorkspace 向后兼容（旧接口）
 func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error) (string, error) {
-	return r.buildPromptInternal(current, request, selectedNodeIDs, retryError)
+	workspaceStr := r.FormatGlobalWorkspace(selectedNodeIDs)
+	return r.buildPromptInternalV2(current, request, workspaceStr, retryError)
 }
 
-// selectAttentionNodes 发起第一次对话，让 LLM 挑选有用的节点
-func (r *Runtime) selectAttentionNodes(current *tasknode.TaskNode, request string) ([]string, error) {
+// === Global Context 系统（替代 selectAttentionNodes） ===
+
+const (
+	MaxTreeIndexChars      = 3000 // 树索引预算
+	MaxArtifactIndexSize   = 20   // artifact 索引最多显示条数
+	MaxArtifactIndexChars  = 2000 // artifact 索引字符预算
+	MaxHandoffChars        = 1000 // 兄弟 handoff 预算
+)
+
+// buildGlobalContext 由 Runtime 自动组装全局上下文（0 额外 LLM 调用）
+func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {
+	var sb strings.Builder
+
+	// 1. 树索引（带预算裁剪）
 	root := r.cursor.GetRoot()
-	if root == nil {
-		return nil, nil
+	if root != nil {
+		treeIdx := r.getTreeIndex(root, 0)
+		if len(treeIdx) > MaxTreeIndexChars {
+			treeIdx = r.getRelevantTreeIndex(current, MaxTreeIndexChars)
+		}
+		sb.WriteString("## Tree Index\n")
+		sb.WriteString(treeIdx)
 	}
 
-	// 1. 生成精简的全树索引
-	treeIndex := r.getTreeIndex(root, 0)
+	// 2. Artifact 索引（受条数 + 字符预算限制，优先最近的）
+	sb.WriteString("\n## Available Artifacts\n")
+	sb.WriteString(r.artifacts.Index(MaxArtifactIndexSize, MaxArtifactIndexChars))
 
-	// 2. 构建筛选 Prompt
-	selectorPrompt := fmt.Sprintf(`You are an Attention Selector for LLMVM.
-
-## Task Tree Index (Compact)
-%s
-
-## Current Target Node
-- ID: %s
-- Name: %s
-- Goal: %s
-
-## Your Task
-Scan the Task Tree Index and select nodes that contain information relevant to the current goal.
-
-**Selection criteria**:
-- Nodes with variables that the current task might need (e.g., file paths, computed values)
-- Nodes with results that provide context (e.g., "file exists", "data loaded")
-- Recent nodes (higher index) are often more relevant
-- Nodes in the same branch or parent chain
-
-**Output format**: Comma-separated Node IDs (e.g., "node_1, node_5, create_dir")
-- If no nodes are relevant: return "none"
-- Limit to 5-10 most relevant nodes (avoid selecting too many)
-
-Example: "node_1, node_5, create_dir"`, treeIndex, current.ID, current.Name, request)
-
-	fmt.Printf("  🧠 Selecting relevant nodes from Global Tree...\n")
-	output, err := r.engine.Call(selectorPrompt)
-	if err != nil {
-		return nil, err
+	// 3. 直系亲属 handoff（受字符预算限制）
+	handoffs := r.collectSiblingHandoffs(current)
+	if len(handoffs) > MaxHandoffChars {
+		handoffs = handoffs[:MaxHandoffChars] + "\n... [MORE HANDOFFS OMITTED]"
+	}
+	if handoffs != "" {
+		sb.WriteString("\n## Sibling Handoffs\n")
+		sb.WriteString(handoffs)
 	}
 
-	raw := strings.TrimSpace(output.Response)
-	if strings.ToLower(raw) == "none" || raw == "" {
-		return nil, nil
-	}
-
-	// 解析 ID 列表
-	ids := strings.Split(raw, ",")
-	for i, id := range ids {
-		ids[i] = strings.TrimSpace(id)
-	}
-	return ids, nil
+	return sb.String()
 }
 
-// getTreeIndex 递归生成紧凑的树索引
+// getRelevantTreeIndex 大树裁剪：只展示祖先链 + 兄弟 + 最近完成节点
+func (r *Runtime) getRelevantTreeIndex(current *tasknode.TaskNode, budget int) string {
+	// 收集祖先链 ID
+	ancestorIDs := make(map[string]bool)
+	node := current
+	for node != nil {
+		ancestorIDs[node.ID] = true
+		node = node.Parent
+	}
+
+	// 收集兄弟 ID
+	siblingIDs := make(map[string]bool)
+	if current.Parent != nil {
+		for _, s := range current.Parent.Children {
+			siblingIDs[s.ID] = true
+		}
+	}
+
+	// 收集最近 10 个已完成节点
+	var recentFinished []*tasknode.TaskNode
+	root := r.cursor.GetRoot()
+	if root != nil {
+		root.Traverse(func(n *tasknode.TaskNode) {
+			if n.WetherFinished && n.Index > 0 {
+				recentFinished = append(recentFinished, n)
+			}
+		})
+	}
+	// 按 Index 倒序，取最近 10 个
+	for i := 0; i < len(recentFinished); i++ {
+		for j := i + 1; j < len(recentFinished); j++ {
+			if recentFinished[i].Index < recentFinished[j].Index {
+				recentFinished[i], recentFinished[j] = recentFinished[j], recentFinished[i]
+			}
+		}
+	}
+	recentIDs := make(map[string]bool)
+	limit := 10
+	if len(recentFinished) < limit {
+		limit = len(recentFinished)
+	}
+	for i := 0; i < limit; i++ {
+		recentIDs[recentFinished[i].ID] = true
+	}
+
+	// 生成裁剪后的索引
+	var sb strings.Builder
+	omitted := 0
+	if root != nil {
+		r.buildFilteredIndex(root, 0, ancestorIDs, siblingIDs, recentIDs, &sb, &omitted, budget)
+	}
+	if omitted > 0 {
+		sb.WriteString(fmt.Sprintf("... (%d more nodes omitted)\n", omitted))
+	}
+	return sb.String()
+}
+
+// buildFilteredIndex 递归构建裁剪后的树索引
+func (r *Runtime) buildFilteredIndex(node *tasknode.TaskNode, indent int, ancestors, siblings, recent map[string]bool, sb *strings.Builder, omitted *int, budget int) {
+	show := ancestors[node.ID] || siblings[node.ID] || recent[node.ID]
+	if !show {
+		*omitted++
+		return
+	}
+	if sb.Len() >= budget {
+		*omitted++
+		return
+	}
+
+	line := r.formatTreeIndexLine(node, indent)
+	sb.WriteString(line)
+
+	for _, child := range node.Children {
+		r.buildFilteredIndex(child, indent+1, ancestors, siblings, recent, sb, omitted, budget)
+	}
+}
+
+// collectSiblingHandoffs 收集已完成兄弟节点的 handoff
+func (r *Runtime) collectSiblingHandoffs(current *tasknode.TaskNode) string {
+	if current.Parent == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, sibling := range current.Parent.Children {
+		if sibling.ID != current.ID && sibling.WetherFinished && sibling.Handoff != "" {
+			sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", sibling.ID, sibling.Name, sibling.Handoff))
+		}
+	}
+	return sb.String()
+}
+
+// getTreeIndex 递归生成紧凑的树索引（enriched：含 result 摘要 + artifact refs）
 func (r *Runtime) getTreeIndex(node *tasknode.TaskNode, indent int) string {
-	line := fmt.Sprintf("%s- [%s] %s (Status: %s)\n", strings.Repeat("  ", indent), node.ID, node.Name, nodeStatusStr(node.Status))
+	line := r.formatTreeIndexLine(node, indent)
 	for _, child := range node.Children {
 		line += r.getTreeIndex(child, indent+1)
 	}
 	return line
+}
+
+// formatTreeIndexLine 格式化单个节点的索引行
+func (r *Runtime) formatTreeIndexLine(node *tasknode.TaskNode, indent int) string {
+	line := fmt.Sprintf("%s- [%s] %s (%s)", strings.Repeat("  ", indent), node.ID, node.Name, nodeStatusStr(node.Status))
+
+	if node.WetherFinished {
+		if node.Result != "" {
+			summary := node.Result
+			if len(summary) > 80 {
+				summary = summary[:80] + "..."
+			}
+			line += fmt.Sprintf(" → %s", summary)
+		}
+		if len(node.ArtifactRefs) > 0 && len(node.ArtifactRefs) <= 3 {
+			line += fmt.Sprintf(" [refs: %s]", strings.Join(node.ArtifactRefs, ","))
+		} else if len(node.ArtifactRefs) > 3 {
+			line += fmt.Sprintf(" [%d refs]", len(node.ArtifactRefs))
+		}
+	}
+
+	return line + "\n"
+}
+
+// selectAttentionNodes 已废弃，保留空实现以防外部调用
+func (r *Runtime) selectAttentionNodes(current *tasknode.TaskNode, request string) ([]string, error) {
+	return nil, nil
 }
 
 // formatGlobalWorkspace 根据选中的 ID 组合详细的 RAM 快照
@@ -386,7 +502,7 @@ func (r *Runtime) findNodeByID(root *tasknode.TaskNode, id string) *tasknode.Tas
 	return nil
 }
 
-func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error) (string, error) {
+func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request string, globalContext string, retryError error) (string, error) {
 	// 构建任务路径
 	taskPath := r.cursor.GetPath()
 
@@ -462,10 +578,15 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 
 	// 收集从根到当前的 Scoped Variables
 	scopedVariables := r.CollectScopedVariables(current)
+	// 🗜️ 按压缩级别裁剪变量（滑动窗口）
+	applyCompression(scopedVariables, r.compressionLevel)
 	varsStr := formatVariables(scopedVariables)
 
-	// Global Workspace (Stateless, based on selection)
-	workspaceStr := r.FormatGlobalWorkspace(selectedNodeIDs)
+	// Global Context（由 Runtime 自动组装，或向后兼容传入）
+	workspaceStr := globalContext
+	if r.compressionLevel >= 1 {
+		workspaceStr = "[COMPRESSED: global context omitted]"
+	}
 
 	// 转换为 JSON（用于结构化数据展示）
 	jsonData, err := json.MarshalIndent(req, "", "    ")
@@ -525,7 +646,7 @@ func (r *Runtime) buildPromptInternal(current *tasknode.TaskNode, request string
 **Loop Context**:
 %s
 
-## Global Workspace (Ephemeral RAM)
+## Global Context (Tree Index + Artifacts + Sibling Handoffs)
 %s
 
 ## Structured Request Data
@@ -929,7 +1050,10 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		return nil
 	case "mark_complete":
 		parent.SingleFinished = true
-		if action.Result != "" {
+		// 结构化摘要（优先 summary，向后兼容 result）
+		if action.Summary != "" {
+			parent.Result = action.Summary
+		} else if action.Result != "" {
 			parent.Result = action.Result
 		}
 		if action.IsImportant {
@@ -941,6 +1065,30 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 			}
 			for k, v := range action.Variables {
 				parent.Variables[k] = v
+			}
+		}
+		// Node Report 结构化字段
+		if len(action.KeyFacts) > 0 {
+			parent.KeyFacts = action.KeyFacts
+		}
+		if len(action.ArtifactRefs) > 0 {
+			parent.ArtifactRefs = action.ArtifactRefs
+			// Pin referenced artifacts
+			for _, ref := range action.ArtifactRefs {
+				r.artifacts.Pin(ref)
+			}
+		}
+		if action.Handoff != "" {
+			parent.Handoff = action.Handoff
+		}
+		// Runtime 兜底：LLM 没提供 key_facts 时生成操作日志
+		if len(parent.KeyFacts) == 0 {
+			parent.KeyFacts = r.generateOperationLog(parent)
+		}
+		// Pin artifacts if node is important
+		if parent.IsImportant {
+			for _, art := range r.artifacts.ListByNode(parent.ID) {
+				r.artifacts.Pin(art.ID)
 			}
 		}
 		fmt.Printf("  ✅ Action: mark_complete (Result: %s)\n", parent.Result)
@@ -1003,38 +1151,138 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		parent.Variables["command_output_history"] = history
 		return nil
 	case "append_to_file":
-		fmt.Printf("📝 Appending to file: %s\n", action.FilePath)
+		safePath, err := sandboxPath(action.FilePath)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("📝 Appending to file: %s\n", safePath)
 
-		// 读取现有内容（如果文件存在）
 		existingContent := ""
-		if data, err := os.ReadFile(action.FilePath); err == nil {
+		if data, err := os.ReadFile(safePath); err == nil {
 			existingContent = string(data)
 		}
 
-		// 追加新内容
 		newContent := existingContent + action.Content
 
-		// 确保目录存在
-		dir := filepath.Dir(action.FilePath)
+		dir := filepath.Dir(safePath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 
-		// 写入文件
-		if err := os.WriteFile(action.FilePath, []byte(newContent), 0644); err != nil {
-			return fmt.Errorf("failed to append to file %s: %w", action.FilePath, err)
+		if err := os.WriteFile(safePath, []byte(newContent), 0644); err != nil {
+			return fmt.Errorf("failed to append to file %s: %w", safePath, err)
 		}
 
-		// 保存结果到变量
 		if parent.Variables == nil {
 			parent.Variables = make(map[string]interface{})
 		}
-		parent.Variables["last_file_written"] = action.FilePath
+		parent.Variables["last_file_written"] = safePath
 		parent.Variables["last_file_size"] = len(newContent)
 
 		fmt.Printf("✅ Successfully appended %d bytes to %s (total: %d bytes)\n",
-			len(action.Content), action.FilePath, len(newContent))
+			len(action.Content), safePath, len(newContent))
 
+		return nil
+	case "read_file":
+		safePath, err := sandboxPath(action.FilePath)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(safePath)
+		if err != nil {
+			return fmt.Errorf("read_file failed: %w", err)
+		}
+		if parent.Variables == nil {
+			parent.Variables = make(map[string]interface{})
+		}
+		art := r.artifacts.Add("file_read", safePath, string(data), parent.ID)
+		parent.Variables["last_read"] = art.ID
+		fmt.Printf("📖 read_file: %s → %s (%d bytes)\n", safePath, art.ID, len(data))
+		return nil
+	case "write_file":
+		safePath, err := sandboxPath(action.FilePath)
+		if err != nil {
+			return err
+		}
+		dir := filepath.Dir(safePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("write_file mkdir failed: %w", err)
+		}
+		if err := os.WriteFile(safePath, []byte(action.Content), 0644); err != nil {
+			return fmt.Errorf("write_file failed: %w", err)
+		}
+		fmt.Printf("✏️  write_file: %s (%d bytes)\n", safePath, len(action.Content))
+		return nil
+	case "list_dir":
+		safePath, err := sandboxPath(action.FilePath)
+		if err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(safePath)
+		if err != nil {
+			return fmt.Errorf("list_dir failed: %w", err)
+		}
+		var lines []string
+		for _, e := range entries {
+			if e.IsDir() {
+				lines = append(lines, e.Name()+"/")
+			} else {
+				lines = append(lines, e.Name())
+			}
+		}
+		if parent.Variables == nil {
+			parent.Variables = make(map[string]interface{})
+		}
+		art := r.artifacts.Add("dir_list", safePath, strings.Join(lines, "\n"), parent.ID)
+		parent.Variables["last_list"] = art.ID
+		fmt.Printf("📂 list_dir: %s → %s (%d entries)\n", safePath, art.ID, len(entries))
+		return nil
+	case "search":
+		safePath, err := sandboxPath(action.FilePath)
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command("grep", "-r", "--include=*", "-n", action.Content, safePath)
+		out, err := cmd.CombinedOutput()
+		result := string(out)
+		var searchStatus string
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				searchStatus = "[NO MATCHES FOUND]"
+			} else {
+				searchStatus = fmt.Sprintf("[SEARCH ERROR: %v]", err)
+			}
+		}
+		if searchStatus != "" {
+			result = searchStatus + "\n" + result
+		}
+		if parent.Variables == nil {
+			parent.Variables = make(map[string]interface{})
+		}
+		source := fmt.Sprintf("%s@%s", action.Content, safePath)
+		art := r.artifacts.Add("search", source, result, parent.ID)
+		parent.Variables["last_search"] = art.ID
+		fmt.Printf("🔍 search: pattern=%q in %s → %s\n", action.Content, safePath, art.ID)
+		return nil
+	case "read_artifact":
+		startLine := action.StartLine
+		endLine := action.EndLine
+		if startLine <= 0 {
+			startLine = 1
+		}
+		slice, err := r.artifacts.ReadSlice(action.ArtifactID, startLine, endLine)
+		if err != nil {
+			return fmt.Errorf("read_artifact failed: %w", err)
+		}
+		if parent.Variables == nil {
+			parent.Variables = make(map[string]interface{})
+		}
+		if len(slice) > MaxCommandResultLength {
+			slice = slice[:MaxCommandResultLength] + fmt.Sprintf("\n... [TRUNCATED: showing %d of more chars]", MaxCommandResultLength)
+		}
+		// 单槽覆盖：每次 read_artifact 覆盖上一次，不累积片段
+		parent.Variables["_artifact_view"] = fmt.Sprintf("[%s lines %d-%d]\n%s", action.ArtifactID, startLine, endLine, slice)
+		fmt.Printf("📎 read_artifact: %s lines %d-%d (%d chars)\n", action.ArtifactID, startLine, endLine, len(slice))
 		return nil
 	case "shutdown":
 		return fmt.Errorf("EMERGENCY_SHUTDOWN: %s", action.Result)
@@ -1382,9 +1630,14 @@ func (r *Runtime) GetCurrentNode() *tasknode.TaskNode {
 	return r.cursor.Current
 }
 
-// IsDone 检查是否已完成
-func (r *Runtime) IsDone() bool {
-	return r.cursor.Done()
+// GetArtifacts 返回 artifact store（用于序列化）
+func (r *Runtime) GetArtifacts() *artifact.Store {
+	return r.artifacts
+}
+
+// SetArtifacts 设置 artifact store（用于反序列化恢复）
+func (r *Runtime) SetArtifacts(store *artifact.Store) {
+	r.artifacts = store
 }
 
 func (r *Runtime) hasUnfinishedChildren(node *tasknode.TaskNode) bool {
@@ -1394,4 +1647,93 @@ func (r *Runtime) hasUnfinishedChildren(node *tasknode.TaskNode) bool {
 		}
 	}
 	return false
+}
+
+// isContextOverflow 检测 API 返回的上下文溢出错误
+func isContextOverflow(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "context_length_exceeded") ||
+		strings.Contains(s, "max_tokens") ||
+		strings.Contains(s, "context window") ||
+		strings.Contains(s, "too many tokens") ||
+		strings.Contains(s, "reduce the length")
+}
+
+// applyCompression 按压缩级别裁剪 scopedVariables（滑动窗口）
+// Level 0: 全量
+// Level 1: 清空 workspace（由调用方处理）
+// Level 2: history 保留最近 5 条
+// Level 3: history 保留最近 2 条
+// Level 4+: 删除全部 history 和非关键变量
+func applyCompression(vars map[string]interface{}, level int) {
+	if level < 2 {
+		return
+	}
+	keep := 5
+	if level >= 3 {
+		keep = 2
+	}
+	if level >= 4 {
+		// 删除所有历史和非关键中间变量
+		delete(vars, "command_output_history")
+		delete(vars, "last_command_result")
+		delete(vars, "last_error")
+		return
+	}
+	// 裁剪 history
+	if hist, ok := vars["command_output_history"]; ok {
+		var history []interface{}
+		switch v := hist.(type) {
+		case []string:
+			for _, s := range v {
+				history = append(history, s)
+			}
+		case []interface{}:
+			history = v
+		}
+		if len(history) > keep {
+			vars["command_output_history"] = history[len(history)-keep:]
+		}
+	}
+}
+
+// generateOperationLog 为没有提供 key_facts 的节点生成操作日志（Runtime 兜底）
+// 输出带 [auto] 前缀，明确标记为机器生成，不伪装成语义事实
+func (r *Runtime) generateOperationLog(node *tasknode.TaskNode) []string {
+	var log []string
+	for k, v := range node.Variables {
+		if strings.HasPrefix(k, "last_") {
+			log = append(log, fmt.Sprintf("[auto] %s = %v", k, v))
+		}
+	}
+	for _, art := range r.artifacts.ListByNode(node.ID) {
+		log = append(log, fmt.Sprintf("[auto] produced %s: %s", art.ID, art.Summary))
+	}
+	return log
+}
+
+// sandboxPath 验证并解析路径，确保在 test/sandbox/ 内。
+// 返回清理后的绝对路径，或错误。
+func sandboxPath(filePath string) (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get working directory: %w", err)
+	}
+	sandboxRoot := filepath.Join(wd, "test", "sandbox")
+
+	var absPath string
+	if filepath.IsAbs(filePath) {
+		absPath = filepath.Clean(filePath)
+	} else {
+		absPath = filepath.Clean(filepath.Join(wd, filePath))
+	}
+
+	// 必须等于 sandboxRoot 或在其子目录下（用 separator 防止前缀绕过）
+	if absPath != sandboxRoot && !strings.HasPrefix(absPath, sandboxRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q is outside sandbox (must be under test/sandbox/)", filePath)
+	}
+	return absPath, nil
 }

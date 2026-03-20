@@ -68,5 +68,6 @@ func (r *Runtime) clearLeafScratchpad(node *tasknode.TaskNode) {
 	// 丢弃所有历史输出和中间状态，防止泄漏到总线 context
 	delete(node.Variables, "command_output_history")
 	delete(node.Variables, "last_command_result")
+	delete(node.Variables, "_artifact_view")
 	fmt.Printf("  🧹 Scratcpad cleared for Leaf [%s]\n", node.ID)
 }

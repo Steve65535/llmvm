@@ -85,18 +85,27 @@ Your role is to process semantic state and return structured actions for the Go-
 
 1. **Stateless Reasoning**: You receive a snapshot of the current node, its path, and an ephemeral "Global Workspace" (RAM). You must not rely on previous turns; all necessary info is in the prompt.
 2. **Global Workspace (Ephemeral RAM)**: This is your high-speed memory. Use the 'is_important' flag or 'result' fields to store key findings and variables.
-4. **Tool Use (FULL SHELL POWER)**:
-    - Use 'execute_command' for ANY terminal command (ls, cat, grep, find, curl, go test, etc.).
-    - **SUPPORTED**: Shell piping (|), redirection (>), background tasks, and standard Linux/Mac utilities.
-    - **PERSISTENCE**: Remember, 'mark_complete' results are just memory. To permanently save a file, you must use 'write' or redirection (e.g., 'echo content > file.md').
+4. **Tool Use**:
+    - 'execute_command' — run any shell command. Result stored as artifact (see Available Artifacts in prompt).
+    - 'read_file' — read a file. Result stored as artifact. Use 'read_artifact' to view slices later.
+    - 'write_file' — create/overwrite a file: {"action_type":"write_file","file_path":"path","content":"..."}.
+    - 'list_dir' — list a directory. Result stored as artifact.
+    - 'search' — grep recursively with file_path (dir) and content (pattern). Result stored as artifact.
+    - 'append_to_file' — append to a file with file_path and content.
+    - 'read_artifact' — read a slice of a previously created artifact:
+      {"action_type":"read_artifact","artifact_id":"art_7","start_line":1,"end_line":50}
+      Use this to inspect artifact content without loading everything into context.
+      If start_line/end_line are omitted, defaults to first 50 lines.
     - Your Current Working Directory is the project root.
-    - **CRITICAL**: All file operations (write, read, create) MUST be performed inside the directory 'test/sandbox'. Create it if it does not exist. Do not touch project root files.
-    - **INCREMENTAL WRITES**: Use '>>' to append to files. Examples:
-        * Append text: echo "new line" >> file.md
-        * Merge files: cat part.md >> total.md
+    - **CRITICAL**: All file operations MUST be performed inside the directory 'test/sandbox'. Create it if it does not exist.
     - Use 'create_node' for task decomposition.
-    - Use 'mark_complete' or 'update_variables' for state transition. **CRITICAL**: You MUST write important results (like filenames, summaries) into 'variables' so they persist for future nodes.
-5. **Node Types**:
+    - Use 'mark_complete' or 'update_variables' for state transition.
+5. **Artifact System**:
+    - All tool results (read_file, search, list_dir, execute_command) are stored as artifacts with stable IDs (art_1, art_2, ...).
+    - Variables only contain artifact references (e.g. last_read = "art_3"), NOT full content.
+    - The "Available Artifacts" section in your prompt shows artifact summaries. Use 'read_artifact' to inspect details.
+    - Data size rule: small results (<500 chars) can go in variables via update_variables. Large results should use write_file then store the path.
+6. **Node Types**:
     - Normal: Task decomposition.
     - Loop: Cyclic/iterative tasks.
     - Leaf: Atomic tasks that fit in one context window. If a task feels complex, decompose it!
@@ -134,13 +143,20 @@ Example:
 
 ## Important Notes
 
-
-- Actions are executed sequentially. 
-- Results of execute_command will appear in your variables as last_command_result in the NEXT step.
-- **ERROR HANDLING**: 
+- Actions are executed sequentially.
+- Results of execute_command will appear in your variables as artifact references in the NEXT step.
+- **ERROR HANDLING**:
     - If you receive 'last_error', your previous attempt failed. Fix it in this turn.
     - Risk-prone nodes SHOULD have an ` + "`" + `error_handler_node` + "`" + `.
 - **SANDBOX**: All file operations must happen in 'test/sandbox/'.
+- **mark_complete HANDOFF (CRITICAL)**:
+    When calling mark_complete, you MUST provide structured handoff fields:
+    - 'summary': What was accomplished (1-2 sentences)
+    - 'key_facts': Array of key findings (file paths, values, decisions)
+    - 'artifact_refs': Array of artifact IDs you produced or used (e.g. ["art_3", "art_5"])
+    - 'handoff': One sentence telling downstream nodes what they should know
+    Example: {"action_type":"mark_complete","summary":"Read config and found 3 endpoints","key_facts":["config at test/sandbox/config.json","3 API endpoints found"],"artifact_refs":["art_2"],"handoff":"Config parsed, endpoints available in art_2 lines 10-15"}
+    If you only provide 'result' without these fields, Runtime will auto-generate a low-quality operation log instead.
 `
 
 	reqBody := ChatRequest{

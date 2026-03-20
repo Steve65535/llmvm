@@ -44,7 +44,13 @@ type TaskNode struct {
 	MaxRetries     int
 	RetryCount     int
 	IterationCount int // Agentic Loop: Current iteration count
-	mutex          sync.Mutex
+
+	// Node Report（结构化交接）
+	KeyFacts     []string `json:"key_facts,omitempty"`
+	ArtifactRefs []string `json:"artifact_refs,omitempty"`
+	Handoff      string   `json:"handoff,omitempty"`
+
+	mutex sync.Mutex
 }
 
 func NewTaskNode(id, name string, typ TaskType, info []string) *TaskNode {

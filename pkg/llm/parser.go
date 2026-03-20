@@ -61,6 +61,17 @@ type Action struct {
 
 	// 🆕 新增：错误处理
 	ErrorHandlerNode NodeDTO `json:"error_handler_node,omitempty"`
+
+	// Node Report（mark_complete 结构化交接）
+	Summary      string   `json:"summary,omitempty"`
+	KeyFacts     []string `json:"key_facts,omitempty"`
+	ArtifactRefs []string `json:"artifact_refs,omitempty"`
+	Handoff      string   `json:"handoff,omitempty"`
+
+	// read_artifact 分片读取
+	ArtifactID string `json:"artifact_id,omitempty"`
+	StartLine  int    `json:"start_line,omitempty"`
+	EndLine    int    `json:"end_line,omitempty"`
 }
 
 // Response 对应 response.json 的根结构
@@ -100,13 +111,31 @@ func ParseResponse(jsonStr string) (*Response, error) {
 			}
 		}
 
-		// 对于 append_to_file action，验证必需字段
-		if action.ActionType == "append_to_file" {
+		// 对于 append_to_file / write_file action，验证必需字段
+		if action.ActionType == "append_to_file" || action.ActionType == "write_file" {
 			if action.FilePath == "" {
-				return nil, fmt.Errorf("action %d (append_to_file) missing file_path", i)
+				return nil, fmt.Errorf("action %d (%s) missing file_path", i, action.ActionType)
 			}
 			if action.Content == "" {
-				return nil, fmt.Errorf("action %d (append_to_file) missing content", i)
+				return nil, fmt.Errorf("action %d (%s) missing content", i, action.ActionType)
+			}
+		}
+		if action.ActionType == "read_file" || action.ActionType == "list_dir" {
+			if action.FilePath == "" {
+				return nil, fmt.Errorf("action %d (%s) missing file_path", i, action.ActionType)
+			}
+		}
+		if action.ActionType == "search" {
+			if action.FilePath == "" {
+				return nil, fmt.Errorf("action %d (search) missing file_path", i)
+			}
+			if action.Content == "" {
+				return nil, fmt.Errorf("action %d (search) missing content (pattern)", i)
+			}
+		}
+		if action.ActionType == "read_artifact" {
+			if action.ArtifactID == "" {
+				return nil, fmt.Errorf("action %d (read_artifact) missing artifact_id", i)
 			}
 		}
 		// mark_complete action 不需要 node 字段，所以不验证
