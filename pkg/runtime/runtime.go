@@ -7,6 +7,7 @@ import (
 	"os"      // Added as per instruction
 	"os/exec" // Added as per instruction
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,10 +19,46 @@ import (
 )
 
 const (
-	MaxCommandResultLength = 4000
+	DefaultContextBudget   = 64000 // 默认总预算（token），可通过 CONTEXT_BUDGET 环境变量覆盖
 	MaxHistoryEntryLength  = 1000
-	MaxVariableDumpLength  = 8000
 )
+
+// BudgetConfig 从总预算按比例派生的各段字符预算
+type BudgetConfig struct {
+	ContextBudget         int // 总预算（token）
+	MaxCommandResultChars int // 单次工具结果上限（字符）
+	MaxVariableDumpChars  int // 变量 dump 上限（字符）
+	MaxTreeIndexChars     int // 树索引预算（字符）
+	MaxArtifactIndexChars int // artifact 索引预算（字符）
+	MaxArtifactIndexSize  int // artifact 索引最多条数
+	MaxHandoffChars       int // 兄弟 handoff 预算（字符）
+}
+
+// newBudgetConfig 从总预算按比例分配
+// 总预算 token → 乘以 4 估算字符数 → 按比例切分
+func newBudgetConfig(totalTokens int) BudgetConfig {
+	totalChars := totalTokens * 4 // 粗估 1 token ≈ 4 chars
+
+	return BudgetConfig{
+		ContextBudget:         totalTokens,
+		MaxCommandResultChars: totalChars * 6 / 100,  // 6% — 单次工具结果
+		MaxVariableDumpChars:  totalChars * 12 / 100,  // 12% — 变量 dump
+		MaxTreeIndexChars:     totalChars * 5 / 100,   // 5% — 树索引
+		MaxArtifactIndexChars: totalChars * 3 / 100,   // 3% — artifact 索引
+		MaxArtifactIndexSize:  20,                      // 条数硬限
+		MaxHandoffChars:       totalChars * 2 / 100,   // 2% — 兄弟 handoff
+	}
+}
+
+// loadContextBudget 从环境变量读取总预算
+func loadContextBudget() int {
+	if s := os.Getenv("CONTEXT_BUDGET"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			return v
+		}
+	}
+	return DefaultContextBudget
+}
 
 // Runtime 是 LLM 运行时引擎
 type Runtime struct {
@@ -31,11 +68,12 @@ type Runtime struct {
 	nodeCounter int // 全局节点计数器
 	vfs         *vfs.VirtualFileSystem
 	artifacts   *artifact.Store
+	budget      BudgetConfig
 
 	// Stagnation Detection
-	lastResponse    string // Store last LLM response text
-	stagnationCount int    // Counter for identical repeated responses
-	lastNodeID      string // 🔧 FIX(Defect 5): Track current node to reset stagnation on node change
+	lastResponse    string
+	stagnationCount int
+	lastNodeID      string
 
 	// Sliding Window Compression (0=full, 1=no workspace, 2=history≤5, 3=history≤2, 4=minimal)
 	compressionLevel int
@@ -46,13 +84,18 @@ type Runtime struct {
 
 // NewRuntime 创建新的运行时实例
 func NewRuntime(engine llm.Engine, root *tasknode.TaskNode) *Runtime {
-	vfsInstance := vfs.New(".") // 默认当前目录
+	vfsInstance := vfs.New(".")
+	budget := newBudgetConfig(loadContextBudget())
+	fmt.Printf("📊 Context budget: %d tokens → tool result %d chars, vars %d chars, tree %d chars, artifacts %d chars, handoff %d chars\n",
+		budget.ContextBudget, budget.MaxCommandResultChars, budget.MaxVariableDumpChars,
+		budget.MaxTreeIndexChars, budget.MaxArtifactIndexChars, budget.MaxHandoffChars)
 	return &Runtime{
 		engine:      engine,
 		cursor:      cursor.New(root),
 		nodeCounter: 0,
 		vfs:         vfsInstance,
 		artifacts:   artifact.New(),
+		budget:      budget,
 	}
 }
 
@@ -138,11 +181,35 @@ func (r *Runtime) Execute(initialRequest string) error {
 				current.Index = r.nodeCounter
 			}
 
+			// 硬预算预检：循环压缩直到 prompt 落在预算内，或到极限后 fail-fast
+			for {
+				estimatedTokens := EstimateTokenCount(prompt)
+				if estimatedTokens <= r.budget.ContextBudget {
+					break
+				}
+				if r.compressionLevel >= 4 {
+					// 压缩到极限仍超预算，本地 fail-fast，不发送
+					lastErr = fmt.Errorf("prompt %d tokens exceeds budget %d even at max compression level 4", estimatedTokens, r.budget.ContextBudget)
+					retryCount++
+					fmt.Printf("  🚨 Budget hard limit: %v\n", lastErr)
+					break
+				}
+				r.compressionLevel++
+				fmt.Printf("  🗜️  Prompt %d tokens exceeds budget %d, pre-compressing to level %d\n",
+					estimatedTokens, r.budget.ContextBudget, r.compressionLevel)
+				prompt, err = r.buildPromptWithGlobalContext(current, initialRequest, globalContext, lastErr)
+				if err != nil {
+					return fmt.Errorf("failed to rebuild prompt: %w", err)
+				}
+			}
+			if lastErr != nil && r.compressionLevel >= 4 {
+				continue // 跳过本次 LLM 调用，进入下一次重试
+			}
+
 			fmt.Printf("  🤖 Calling LLM (Attempt %d)...\n", retryCount+1)
 
 			// 统计 Token 使用情况
-			const DeepSeekContextLimit = 64000 // DeepSeek 的上下文窗口
-			r.printTokenStats(prompt, DeepSeekContextLimit)
+			r.printTokenStats(prompt, r.budget.ContextBudget)
 
 			output, err := r.engine.Call(prompt)
 			if err != nil {
@@ -280,13 +347,6 @@ func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request s
 
 // === Global Context 系统（替代 selectAttentionNodes） ===
 
-const (
-	MaxTreeIndexChars      = 3000 // 树索引预算
-	MaxArtifactIndexSize   = 20   // artifact 索引最多显示条数
-	MaxArtifactIndexChars  = 2000 // artifact 索引字符预算
-	MaxHandoffChars        = 1000 // 兄弟 handoff 预算
-)
-
 // buildGlobalContext 由 Runtime 自动组装全局上下文（0 额外 LLM 调用）
 func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {
 	var sb strings.Builder
@@ -295,8 +355,8 @@ func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {
 	root := r.cursor.GetRoot()
 	if root != nil {
 		treeIdx := r.getTreeIndex(root, 0)
-		if len(treeIdx) > MaxTreeIndexChars {
-			treeIdx = r.getRelevantTreeIndex(current, MaxTreeIndexChars)
+		if len(treeIdx) > r.budget.MaxTreeIndexChars {
+			treeIdx = r.getRelevantTreeIndex(current, r.budget.MaxTreeIndexChars)
 		}
 		sb.WriteString("## Tree Index\n")
 		sb.WriteString(treeIdx)
@@ -304,12 +364,12 @@ func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {
 
 	// 2. Artifact 索引（受条数 + 字符预算限制，优先最近的）
 	sb.WriteString("\n## Available Artifacts\n")
-	sb.WriteString(r.artifacts.Index(MaxArtifactIndexSize, MaxArtifactIndexChars))
+	sb.WriteString(r.artifacts.Index(r.budget.MaxArtifactIndexSize, r.budget.MaxArtifactIndexChars))
 
 	// 3. 直系亲属 handoff（受字符预算限制）
 	handoffs := r.collectSiblingHandoffs(current)
-	if len(handoffs) > MaxHandoffChars {
-		handoffs = handoffs[:MaxHandoffChars] + "\n... [MORE HANDOFFS OMITTED]"
+	if len(handoffs) > r.budget.MaxHandoffChars {
+		handoffs = handoffs[:r.budget.MaxHandoffChars] + "\n... [MORE HANDOFFS OMITTED]"
 	}
 	if handoffs != "" {
 		sb.WriteString("\n## Sibling Handoffs\n")
@@ -576,19 +636,6 @@ func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request stri
 		Request:     request,
 	}
 
-	// 收集从根到当前的 Scoped Variables
-	scopedVariables := r.CollectScopedVariables(current)
-	// 🗜️ 按压缩级别裁剪变量（滑动窗口）
-	applyCompression(scopedVariables, r.compressionLevel)
-	varsStr := formatVariables(scopedVariables)
-
-	// Global Context（由 Runtime 自动组装，或向后兼容传入）
-	workspaceStr := globalContext
-	if r.compressionLevel >= 1 {
-		workspaceStr = "[COMPRESSED: global context omitted]"
-	}
-
-	// 转换为 JSON（用于结构化数据展示）
 	jsonData, err := json.MarshalIndent(req, "", "    ")
 	if err != nil {
 		return "", err
@@ -617,6 +664,54 @@ func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request stri
 > 2. **Python Syntax**: If using '-c', don't use nested blocks. Use simple expressions.
 > 3. **JSON Format**: Ensure no unescaped quotes or trailing commas.
 `, retryError, specificAdvice)
+	}
+
+	// === 硬预算约束：先测量固定部分，再把剩余空间分给可变部分 ===
+
+	// 固定部分（不可压缩）
+	fixedParts := []string{
+		formatPath(taskPath),
+		current.ID, current.Name, nodeTypeStr(current.Type), nodeStatusStr(current.Status),
+		fmt.Sprintf("%d", current.Index),
+		fmt.Sprintf("%v", current.WetherTraveled), fmt.Sprintf("%v", current.WetherFinished),
+		strings.Join(current.Information, "\n"),
+		parentInfo.ID, parentInfo.Name, parentInfo.Type, parentInfo.Status,
+		childrenInfo,
+		loopInfo,
+		string(jsonData),
+		errorContext,
+		request,
+		nodeTypeStr(current.Type),
+	}
+	fixedChars := 3000 // prompt 模板本身的固定文本（标题、说明、示例等）
+	for _, p := range fixedParts {
+		fixedChars += len(p)
+	}
+
+	// 总预算（字符）= token * 4，预留 20% 给 system prompt + 输出 token
+	totalCharBudget := r.budget.ContextBudget * 4 * 80 / 100
+	remainingChars := totalCharBudget - fixedChars
+	if remainingChars < 1000 {
+		remainingChars = 1000 // 最低保底
+	}
+
+	// 可变部分按比例分配剩余空间
+	// globalContext: 50%, variables: 40%, 预留: 10%
+	globalContextBudget := remainingChars * 50 / 100
+	variablesBudget := remainingChars * 40 / 100
+
+	// 收集从根到当前的 Scoped Variables
+	scopedVariables := r.CollectScopedVariables(current)
+	applyCompression(scopedVariables, r.compressionLevel)
+	varsStr := formatVariables(scopedVariables, variablesBudget)
+
+	// Global Context
+	workspaceStr := globalContext
+	if r.compressionLevel >= 1 {
+		workspaceStr = "[COMPRESSED: global context omitted]"
+	}
+	if len(workspaceStr) > globalContextBudget {
+		workspaceStr = workspaceStr[:globalContextBudget] + "\n... [GLOBAL CONTEXT TRUNCATED TO FIT BUDGET]"
 	}
 
 	// 构建完整的 prompt
@@ -689,12 +784,6 @@ Please respond with valid JSON in the required format.
 - If Leaf: Execute the task directly using commands or mark_complete
 
 ## Execution Requirements (STRICT):
-
-0. **STRICT PROHIBITION ON PROGRAMMING LANGUAGES**: 
-   - DO NOT USE 'python3', 'node', 'ruby', 'perl', or any other programming language interpreters.
-   - All reasoning, mathematical calculations (like prime checking), and logic MUST be performed by YOU, decomposing them into atomic steps within the Task Tree.
-   - You may use simple shell tools like 'expr', 'bc', 'awk', or 'sed' for basic calculations, but the logic must reside in your reasoning process.
-   - The goal is to test YOUR ability to orchestrate complex reasoning via the Task Tree structure.
 
 1. **Physical Persistence check**: If you see a file mentioned in a previous node's 'Result', **DO NOT** assume it exists physically. You MUST use 'ls' to verify its existence before attempting to 'cat' it.
 
@@ -989,7 +1078,7 @@ func (r *Runtime) CollectScopedVariables(current *tasknode.TaskNode) map[string]
 }
 
 // formatVariables 格式化变量为可读字符串
-func formatVariables(vars map[string]interface{}) string {
+func formatVariables(vars map[string]interface{}, maxLen int) string {
 	if len(vars) == 0 {
 		return "No scoped variables."
 	}
@@ -1024,8 +1113,8 @@ func formatVariables(vars map[string]interface{}) string {
 	if len(vars) > 0 {
 		data, _ := json.MarshalIndent(vars, "", "  ")
 		varsStr := string(data)
-		if len(varsStr) > MaxVariableDumpLength {
-			varsStr = varsStr[:MaxVariableDumpLength] + "\n... [TRUNCATED DUE TO SIZE]"
+		if len(varsStr) > maxLen {
+			varsStr = varsStr[:maxLen] + "\n... [TRUNCATED DUE TO SIZE]"
 		}
 		sb.WriteString("\n### Other Variables:\n")
 		sb.WriteString(varsStr)
@@ -1276,8 +1365,8 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		if parent.Variables == nil {
 			parent.Variables = make(map[string]interface{})
 		}
-		if len(slice) > MaxCommandResultLength {
-			slice = slice[:MaxCommandResultLength] + fmt.Sprintf("\n... [TRUNCATED: showing %d of more chars]", MaxCommandResultLength)
+		if len(slice) > r.budget.MaxCommandResultChars {
+			slice = slice[:r.budget.MaxCommandResultChars] + fmt.Sprintf("\n... [TRUNCATED: showing %d of more chars]", r.budget.MaxCommandResultChars)
 		}
 		// 单槽覆盖：每次 read_artifact 覆盖上一次，不累积片段
 		parent.Variables["_artifact_view"] = fmt.Sprintf("[%s lines %d-%d]\n%s", action.ArtifactID, startLine, endLine, slice)
