@@ -1117,15 +1117,14 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 			return fmt.Errorf("command execution failed: %w", err)
 		}
 		fmt.Printf("📝 Command result: %s\n", result)
-		// Truncate result for last_command_result
-		storageResult := result
-		if len(storageResult) > MaxCommandResultLength {
-			storageResult = storageResult[:MaxCommandResultLength] + "\n... [TRUNCATED]"
+		if parent.Variables == nil {
+			parent.Variables = make(map[string]interface{})
 		}
-		parent.Variables["last_command_result"] = storageResult
+		// 存入 Artifact Store
+		art := r.artifacts.Add("command", action.Command, result, parent.ID)
+		parent.Variables["last_command"] = art.ID
 
-		// Append to Command History
-		// Truncate entry for history to avoid context bloating
+		// 保留 command history 用于 agentic loop 上下文
 		if len(result) > MaxHistoryEntryLength {
 			result = result[:MaxHistoryEntryLength] + "\n... [TRUNCATED]"
 		}
