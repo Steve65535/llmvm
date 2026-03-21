@@ -12,7 +12,6 @@ import (
 )
 
 func main() {
-	// 命令行参数
 	port := flag.Int("port", 8081, "Port for the visualizer backend API")
 	stateFile := flag.String("file", "../deep_compiler.json", "Path to the LLMVM state JSON file")
 	flag.Parse()
@@ -20,9 +19,22 @@ func main() {
 	log.Printf("Starting Visualizer Backend on port %d...", *port)
 	log.Printf("Monitoring state file: %s", *stateFile)
 
-	// 提供数据的核心 API
+	// 读取并解析状态文件的辅助函数
+	readState := func() (map[string]interface{}, error) {
+		absPath, _ := filepath.Abs(*stateFile)
+		data, err := ioutil.ReadFile(absPath)
+		if err != nil {
+			return nil, err
+		}
+		var raw map[string]interface{}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, err
+		}
+		return raw, nil
+	}
+
+	// /api/state — 返回任务树（兼容新旧格式）
 	http.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
-		// 允许跨域（本地开发方便）
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
@@ -32,27 +44,54 @@ func main() {
 			return
 		}
 
-		// 读取文件
-		absPath, _ := filepath.Abs(*stateFile)
-		data, err := ioutil.ReadFile(absPath)
+		raw, err := readState()
 		if err != nil {
 			if os.IsNotExist(err) {
-				http.Error(w, fmt.Sprintf("State file not found at %s. Ensure LLMVM is running and saving to this path.", absPath), http.StatusNotFound)
+				absPath, _ := filepath.Abs(*stateFile)
+				http.Error(w, fmt.Sprintf("State file not found at %s.", absPath), http.StatusNotFound)
 			} else {
 				http.Error(w, fmt.Sprintf("Error reading state file: %v", err), http.StatusInternalServerError)
 			}
 			return
 		}
 
-		// 为了防止 JSON 不完整（写入过程中正好被读取），这里做一次基础的校验
-		var testMap map[string]interface{}
-		if err := json.Unmarshal(data, &testMap); err != nil {
-			http.Error(w, fmt.Sprintf("State file is currently being written or is malformed: %v", err), http.StatusServiceUnavailable)
-			return
+		// 新格式：{root: ..., artifacts: ...}，提取 root
+		// 旧格式：顶层就是 TaskNode，直接返回
+		var treeData interface{}
+		if root, ok := raw["root"]; ok {
+			treeData = root
+		} else {
+			treeData = raw
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
+		json.NewEncoder(w).Encode(treeData)
+	})
+
+	// /api/artifacts — 返回 artifact store（新格式专用）
+	http.HandleFunc("/api/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		raw, err := readState()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		artifacts, ok := raw["artifacts"]
+		if !ok {
+			artifacts = map[string]interface{}{"artifacts": []interface{}{}, "counter": 0}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(artifacts)
 	})
 
 	addr := fmt.Sprintf(":%d", *port)
