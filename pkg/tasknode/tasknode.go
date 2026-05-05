@@ -2,6 +2,7 @@ package tasknode
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -13,6 +14,7 @@ const (
 	Running
 	Completed
 	Failed
+	WaitingHuman // 节点暂停，等待人类输入
 )
 
 type TaskType int
@@ -22,6 +24,23 @@ const (
 	Loop
 	Leaf
 )
+
+// HumanRequest 是模型发出的结构化人类输入请求
+type HumanRequest struct {
+	Question  string   `json:"question"`
+	Context   string   `json:"context,omitempty"`
+	Options   []string `json:"options,omitempty"`
+	Blocking  bool     `json:"blocking"`
+	CreatedAt int64    `json:"created_at"`
+}
+
+// HumanResponse 是人类对请求的结构化回复
+type HumanResponse struct {
+	Value       string `json:"value"`
+	Note        string `json:"note,omitempty"`
+	RelatedNode string `json:"related_node,omitempty"`
+	Timestamp   int64  `json:"timestamp"`
+}
 
 type TaskNode struct {
 	ID             string
@@ -49,6 +68,19 @@ type TaskNode struct {
 	KeyFacts     []string `json:"key_facts,omitempty"`
 	ArtifactRefs []string `json:"artifact_refs,omitempty"`
 	Handoff      string   `json:"handoff,omitempty"`
+
+	// 扩展结构化交接字段
+	Goal          string   `json:"goal,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	Decisions     []string `json:"decisions,omitempty"`
+	Assumptions   []string `json:"assumptions,omitempty"`
+	Outputs       []string `json:"outputs,omitempty"`
+	OpenQuestions []string `json:"open_questions,omitempty"`
+	Confidence    string   `json:"confidence,omitempty"` // "high", "medium", "low", "auto_generated"
+
+	// Human-in-the-loop
+	HumanRequest  *HumanRequest  `json:"human_request,omitempty"`
+	HumanResponse *HumanResponse `json:"human_response,omitempty"`
 
 	mutex sync.Mutex
 }
@@ -199,4 +231,42 @@ func (t *TaskNode) RestoreParents() {
 		child.Parent = t
 		child.RestoreParents()
 	}
+}
+
+// AppendSiblingAfter 在当前节点之后插入一个同级节点。
+// 禁止在 root 节点（无 Parent）上调用。
+// 禁止在 Loop 节点的直接子节点上调用（Loop 语义尚未验证）。
+func (t *TaskNode) AppendSiblingAfter(sibling *TaskNode) error {
+	if t.Parent == nil {
+		return fmt.Errorf("cannot append sibling to root node")
+	}
+	if t.Parent.Type == Loop {
+		return fmt.Errorf("append_sibling_node is not allowed inside a Loop node (v1 restriction)")
+	}
+
+	parent := t.Parent
+	parent.mutex.Lock()
+	defer parent.mutex.Unlock()
+
+	// 找到当前节点在父节点 children 中的位置
+	idx := -1
+	for i, c := range parent.Children {
+		if c.ID == t.ID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("current node %s not found in parent's children", t.ID)
+	}
+
+	sibling.Parent = parent
+	// 插入到 idx+1 位置
+	newChildren := make([]*TaskNode, 0, len(parent.Children)+1)
+	newChildren = append(newChildren, parent.Children[:idx+1]...)
+	newChildren = append(newChildren, sibling)
+	newChildren = append(newChildren, parent.Children[idx+1:]...)
+	parent.Children = newChildren
+	parent.UpdatedAt = time.Now()
+	return nil
 }

@@ -63,15 +63,34 @@ type Action struct {
 	ErrorHandlerNode NodeDTO `json:"error_handler_node,omitempty"`
 
 	// Node Report（mark_complete 结构化交接）
-	Summary      string   `json:"summary,omitempty"`
-	KeyFacts     []string `json:"key_facts,omitempty"`
-	ArtifactRefs []string `json:"artifact_refs,omitempty"`
-	Handoff      string   `json:"handoff,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	KeyFacts      []string `json:"key_facts,omitempty"`
+	ArtifactRefs  []string `json:"artifact_refs,omitempty"`
+	Handoff       string   `json:"handoff,omitempty"`
+
+	// 扩展结构化交接字段
+	Goal          string   `json:"goal,omitempty"`
+	Decisions     []string `json:"decisions,omitempty"`
+	Assumptions   []string `json:"assumptions,omitempty"`
+	Outputs       []string `json:"outputs,omitempty"`
+	OpenQuestions []string `json:"open_questions,omitempty"`
+	Confidence    string   `json:"confidence,omitempty"`
 
 	// read_artifact 分片读取
 	ArtifactID string `json:"artifact_id,omitempty"`
 	StartLine  int    `json:"start_line,omitempty"`
 	EndLine    int    `json:"end_line,omitempty"`
+
+	// request_human_input
+	Question string   `json:"question,omitempty"`
+	Context  string   `json:"context,omitempty"`
+	Options  []string `json:"options,omitempty"`
+	Blocking bool     `json:"blocking,omitempty"`
+
+	// query_memory
+	QueryType string                 `json:"query_type,omitempty"`
+	Filters   map[string]interface{} `json:"filters,omitempty"`
+	Limit     int                    `json:"limit,omitempty"`
 }
 
 // Response 对应 response.json 的根结构
@@ -136,6 +155,35 @@ func ParseResponse(jsonStr string) (*Response, error) {
 		if action.ActionType == "read_artifact" {
 			if action.ArtifactID == "" {
 				return nil, fmt.Errorf("action %d (read_artifact) missing artifact_id", i)
+			}
+		}
+		if action.ActionType == "request_human_input" {
+			if action.Question == "" {
+				return nil, fmt.Errorf("action %d (request_human_input) missing question", i)
+			}
+		}
+		if action.ActionType == "append_sibling_node" {
+			if action.Node.ID == "" {
+				return nil, fmt.Errorf("action %d (append_sibling_node) missing node.id", i)
+			}
+			switch action.Node.Type {
+			case "Normal", "Loop", "Leaf":
+			case "":
+				return nil, fmt.Errorf("action %d (append_sibling_node) missing node type", i)
+			default:
+				return nil, fmt.Errorf("action %d (append_sibling_node) invalid node type: %s", i, action.Node.Type)
+			}
+		}
+		if action.ActionType == "query_memory" {
+			validQueryTypes := map[string]bool{
+				"sibling_handoffs": true,
+				"ancestor_chain":   true,
+				"pinned_artifacts": true,
+				"recent_artifacts": true,
+				"fts_artifacts":    true,
+			}
+			if !validQueryTypes[action.QueryType] {
+				return nil, fmt.Errorf("action %d (query_memory) invalid query_type: %q", i, action.QueryType)
 			}
 		}
 		// mark_complete action 不需要 node 字段，所以不验证

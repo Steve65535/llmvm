@@ -110,6 +110,27 @@ Your role is to process semantic state and return structured actions for the Go-
     - Loop: Cyclic/iterative tasks.
     - Leaf: Atomic tasks that fit in one context window. If a task feels complex, decompose it!
 
+## New Actions
+
+7. **Human-in-the-loop** — pause execution and request structured human input:
+   Use when: operation is destructive, task is ambiguous, multiple retries indicate being stuck, or final confirmation is needed.
+   {"action_type":"request_human_input","question":"Should we delete all temp files?","context":"Found 37 temp files totaling 2GB","options":["continue","report_only","abort"],"blocking":true}
+   - After human responds, their answer is available in variables as 'human_response' and 'human_note'.
+   - Always provide 'options' when possible to guide the human.
+
+8. **Append sibling node** — add a new peer task after the current node:
+   Use when: you discover work that belongs at the same level as the current node, NOT as a child.
+   {"action_type":"append_sibling_node","node":{"id":"inspect_frontend","name":"Inspect Frontend","type":"Leaf","information":"..."}}
+   - NOT allowed inside Loop nodes (v1 restriction).
+   - NOT allowed on root node.
+   - The new node will be executed after the current node completes.
+
+9. **Query memory** — query the structured SQLite retrieval index (Runtime executes the query, result stored as artifact):
+   Use when: you need to find sibling handoffs, ancestor context, or search artifacts by content.
+   {"action_type":"query_memory","query_type":"sibling_handoffs","filters":{"parent_id":"node_12","status":["completed","failed"]},"limit":5}
+   Valid query_types: "sibling_handoffs", "ancestor_chain", "pinned_artifacts", "recent_artifacts", "fts_artifacts"
+   For fts_artifacts: {"action_type":"query_memory","query_type":"fts_artifacts","filters":{"query":"database schema"},"limit":5}
+
 ## Response Format (STRICT)
 You must output a SINGLE, VALID JSON object.
 - **NO Markdown**: Do not use markdown code block wrappers (e.g. triple backtick json). Just raw JSON.
@@ -122,10 +143,10 @@ Example:
   "actions": [
     {
       "action_type": "create_node",
-      "node": { 
-        "id": "node_v1", 
-        "name": "Node With Handler", 
-        "type": "Normal", 
+      "node": {
+        "id": "node_v1",
+        "name": "Node With Handler",
+        "type": "Normal",
         "information": "Description",
         "error_handler_id": "optional_id",
         "max_retries": 3
@@ -151,12 +172,20 @@ Example:
 - **SANDBOX**: All file operations must happen in 'test/sandbox/'.
 - **mark_complete HANDOFF (CRITICAL)**:
     When calling mark_complete, you MUST provide structured handoff fields:
+    - 'goal': What this node was responsible for (1 sentence)
     - 'summary': What was accomplished (1-2 sentences)
     - 'key_facts': Array of key findings (file paths, values, decisions)
+    - 'decisions': Array of important choices made during this node
+    - 'assumptions': Array of unverified assumptions made
     - 'artifact_refs': Array of artifact IDs you produced or used (e.g. ["art_3", "art_5"])
+    - 'outputs': Array of files, values, or state produced
+    - 'open_questions': Array of known unresolved issues for downstream nodes
     - 'handoff': One sentence telling downstream nodes what they should know
-    Example: {"action_type":"mark_complete","summary":"Read config and found 3 endpoints","key_facts":["config at test/sandbox/config.json","3 API endpoints found"],"artifact_refs":["art_2"],"handoff":"Config parsed, endpoints available in art_2 lines 10-15"}
+    - 'confidence': One of "high", "medium", "low" (omit if unsure, Runtime will set "auto_generated")
+    Example: {"action_type":"mark_complete","goal":"Read and parse config file","summary":"Read config and found 3 endpoints","key_facts":["config at test/sandbox/config.json","3 API endpoints found"],"decisions":["Used JSON format over YAML"],"artifact_refs":["art_2"],"outputs":["test/sandbox/config.json"],"handoff":"Config parsed, endpoints available in art_2 lines 10-15","confidence":"high"}
     If you only provide 'result' without these fields, Runtime will auto-generate a low-quality operation log instead.
+- **Node Activation Context**:
+    The "Hierarchy Path", "Parent Goal", "Sibling Handoffs", and "Available Artifacts" sections in your prompt are pre-assembled by the Runtime's node activation system. Use them to understand your position in the task tree and what sibling nodes have already accomplished. Treat sibling handoffs as evidence with provenance, not absolute facts.
 `
 
 	reqBody := ChatRequest{

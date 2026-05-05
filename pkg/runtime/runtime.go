@@ -3,6 +3,7 @@ package runtime
 import (
 	// Added for os/exec output capture
 	"encoding/json"
+	"errors"
 	"fmt"     // Added as per instruction
 	"os"      // Added as per instruction
 	"os/exec" // Added as per instruction
@@ -14,6 +15,7 @@ import (
 	"github.com/Steve65535/llmvm/pkg/artifact"
 	"github.com/Steve65535/llmvm/pkg/cursor"
 	"github.com/Steve65535/llmvm/pkg/llm"
+	"github.com/Steve65535/llmvm/pkg/memory"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 	"github.com/Steve65535/llmvm/pkg/vfs"
 )
@@ -69,6 +71,7 @@ type Runtime struct {
 	vfs         *vfs.VirtualFileSystem
 	artifacts   *artifact.Store
 	budget      BudgetConfig
+	memStore    *memory.Store // SQLite 结构化检索层
 
 	// Stagnation Detection
 	lastResponse    string
@@ -80,15 +83,31 @@ type Runtime struct {
 
 	// OnStepComplete is called after each node execution step
 	OnStepComplete func(*tasknode.TaskNode)
+
+	// HumanInputFunc 是 runtime 请求人类输入时调用的函数。
+	// 如果为 nil，则使用标准输入（stdin）。
+	HumanInputFunc func(req *tasknode.HumanRequest) (*tasknode.HumanResponse, error)
 }
 
-// NewRuntime 创建新的运行时实例
-func NewRuntime(engine llm.Engine, root *tasknode.TaskNode) *Runtime {
+// NewRuntime 创建新的运行时实例。dbPath 为空时使用进程内 :memory: 库。
+func NewRuntime(engine llm.Engine, root *tasknode.TaskNode, dbPath ...string) *Runtime {
 	vfsInstance := vfs.New(".")
 	budget := newBudgetConfig(loadContextBudget())
 	fmt.Printf("📊 Context budget: %d tokens → tool result %d chars, vars %d chars, tree %d chars, artifacts %d chars, handoff %d chars\n",
 		budget.ContextBudget, budget.MaxCommandResultChars, budget.MaxVariableDumpChars,
 		budget.MaxTreeIndexChars, budget.MaxArtifactIndexChars, budget.MaxHandoffChars)
+
+	sqlitePath := ":memory:"
+	if len(dbPath) > 0 && dbPath[0] != "" {
+		sqlitePath = dbPath[0]
+	}
+	mem, err := memory.New(sqlitePath)
+	if err != nil {
+		fmt.Printf("⚠️  Failed to init memory store (%s): %v (continuing without SQLite)\n", sqlitePath, err)
+	} else if sqlitePath != ":memory:" {
+		fmt.Printf("🗄️  SQLite memory store: %s\n", sqlitePath)
+	}
+
 	return &Runtime{
 		engine:      engine,
 		cursor:      cursor.New(root),
@@ -96,6 +115,7 @@ func NewRuntime(engine llm.Engine, root *tasknode.TaskNode) *Runtime {
 		vfs:         vfsInstance,
 		artifacts:   artifact.New(),
 		budget:      budget,
+		memStore:    mem,
 	}
 }
 
@@ -135,6 +155,12 @@ func (r *Runtime) Execute(initialRequest string) error {
 			if err := r.decideNextStep(current); err != nil {
 				return err
 			}
+			continue
+		}
+
+		// WaitingHuman 状态：节点已暂停等待人类输入，跳过（由 handleRequestHumanInput 同步处理）
+		if current.Status == tasknode.WaitingHuman {
+			fmt.Printf("  ⏸️  Node [%s] is WaitingHuman, skipping\n", current.ID)
 			continue
 		}
 
@@ -265,6 +291,14 @@ func (r *Runtime) Execute(initialRequest string) error {
 					if strings.Contains(err.Error(), "EMERGENCY_SHUTDOWN") {
 						return err
 					}
+					// WaitingHuman：持久化暂停，直接返回哨兵错误，让调用方持久化并退出
+					if errors.Is(err, ErrWaitingHuman) {
+						fmt.Printf("  ⏸️  Node [%s] paused: waiting for human input\n", current.ID)
+						if r.OnStepComplete != nil {
+							r.OnStepComplete(current)
+						}
+						return ErrWaitingHuman
+					}
 					// 🔧 FIX: 错误处理与重试逻辑
 					lastErr = fmt.Errorf("failed to execute action: %w", err)
 					if r.handleError(current, lastErr) {
@@ -347,36 +381,13 @@ func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request s
 
 // === Global Context 系统（替代 selectAttentionNodes） ===
 
-// buildGlobalContext 由 Runtime 自动组装全局上下文（0 额外 LLM 调用）
+// buildGlobalContext 由 Runtime 自动组装全局上下文（0 额外 LLM 调用）。
+// 现在委托给 buildNodeActivation，提供更结构化的上下文。
 func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {
-	var sb strings.Builder
-
-	// 1. 树索引（带预算裁剪）
-	root := r.cursor.GetRoot()
-	if root != nil {
-		treeIdx := r.getTreeIndex(root, 0)
-		if len(treeIdx) > r.budget.MaxTreeIndexChars {
-			treeIdx = r.getRelevantTreeIndex(current, r.budget.MaxTreeIndexChars)
-		}
-		sb.WriteString("## Tree Index\n")
-		sb.WriteString(treeIdx)
-	}
-
-	// 2. Artifact 索引（受条数 + 字符预算限制，优先最近的）
-	sb.WriteString("\n## Available Artifacts\n")
-	sb.WriteString(r.artifacts.Index(r.budget.MaxArtifactIndexSize, r.budget.MaxArtifactIndexChars))
-
-	// 3. 直系亲属 handoff（受字符预算限制）
-	handoffs := r.collectSiblingHandoffs(current)
-	if len(handoffs) > r.budget.MaxHandoffChars {
-		handoffs = handoffs[:r.budget.MaxHandoffChars] + "\n... [MORE HANDOFFS OMITTED]"
-	}
-	if handoffs != "" {
-		sb.WriteString("\n## Sibling Handoffs\n")
-		sb.WriteString(handoffs)
-	}
-
-	return sb.String()
+	act := r.buildNodeActivation(current)
+	// 同步节点到 SQLite index
+	r.syncNodeToMemory(current)
+	return act.WorkingContext
 }
 
 // getRelevantTreeIndex 大树裁剪：只展示祖先链 + 兄弟 + 最近完成节点
@@ -456,7 +467,7 @@ func (r *Runtime) buildFilteredIndex(node *tasknode.TaskNode, indent int, ancest
 	}
 }
 
-// collectSiblingHandoffs 收集已完成兄弟节点的 handoff
+// collectSiblingHandoffs 收集已完成兄弟节点的 handoff（向后兼容，activation.go 中有更丰富的版本）
 func (r *Runtime) collectSiblingHandoffs(current *tasknode.TaskNode) string {
 	if current.Parent == nil {
 		return ""
@@ -468,6 +479,116 @@ func (r *Runtime) collectSiblingHandoffs(current *tasknode.TaskNode) string {
 		}
 	}
 	return sb.String()
+}
+
+// RebuildIndexFromAST 从当前 AST + artifact store 完整重建 SQLite 索引。
+// 在 --load 恢复状态后调用，防止 .sqlite 丢失或过期导致 query_memory 查不到数据。
+func (r *Runtime) RebuildIndexFromAST() error {
+	if r.memStore == nil {
+		return nil
+	}
+	root := r.cursor.GetRoot()
+	if root == nil {
+		return nil
+	}
+
+	var nodes []memory.RebuildNode
+	root.Traverse(func(n *tasknode.TaskNode) {
+		parentID := ""
+		depth := 0
+		cur := n
+		for cur.Parent != nil {
+			depth++
+			cur = cur.Parent
+		}
+		if n.Parent != nil {
+			parentID = n.Parent.ID
+		}
+		info := ""
+		if len(n.Information) > 0 {
+			info = n.Information[0]
+		}
+		hasHandoff := n.WetherFinished || n.SingleFinished
+		confidence := n.Confidence
+		if confidence == "" && hasHandoff {
+			confidence = "auto_generated"
+		}
+		nodes = append(nodes, memory.RebuildNode{
+			ID:             n.ID,
+			ParentID:       parentID,
+			Name:           n.Name,
+			Type:           nodeTypeStr(n.Type),
+			Status:         nodeStatusStr(n.Status),
+			Information:    info,
+			Depth:          depth,
+			TraversalIndex: n.Index,
+			Goal:           n.Goal,
+			Summary:        n.Summary,
+			KeyFacts:       n.KeyFacts,
+			Decisions:      n.Decisions,
+			Assumptions:    n.Assumptions,
+			ArtifactRefs:   n.ArtifactRefs,
+			Outputs:        n.Outputs,
+			OpenQuestions:  n.OpenQuestions,
+			Handoff:        n.Handoff,
+			Confidence:     confidence,
+			HasHandoff:     hasHandoff,
+		})
+	})
+
+	var arts []memory.RebuildArtifact
+	for _, a := range r.artifacts.ListAll() {
+		arts = append(arts, memory.RebuildArtifact{
+			ID:             a.ID,
+			ProducerNodeID: a.CreatedBy,
+			Kind:           a.Type,
+			Title:          a.Source,
+			Summary:        a.Summary,
+			ContentRef:     a.SpillPath,
+			Pinned:         a.Pinned,
+		})
+	}
+
+	return r.memStore.Rebuild(memory.RebuildInput{Nodes: nodes, Artifacts: arts})
+}
+
+// syncNodeToMemory 将节点状态同步到 SQLite index。
+func (r *Runtime) syncNodeToMemory(node *tasknode.TaskNode) {
+	if r.memStore == nil {
+		return
+	}
+	parentID := ""
+	depth := 0
+	n := node
+	for n.Parent != nil {
+		depth++
+		n = n.Parent
+	}
+	if node.Parent != nil {
+		parentID = node.Parent.ID
+	}
+	info := ""
+	if len(node.Information) > 0 {
+		info = node.Information[0]
+	}
+	_ = r.memStore.UpsertNode(
+		node.ID, parentID, node.Name,
+		nodeTypeStr(node.Type), nodeStatusStr(node.Status),
+		info, depth, node.Index,
+	)
+	// 同步 handoff（如果节点已完成）
+	if node.WetherFinished || node.SingleFinished {
+		confidence := node.Confidence
+		if confidence == "" && node.WetherFinished {
+			confidence = "auto_generated"
+		}
+		_ = r.memStore.UpsertHandoff(
+			node.ID, node.Goal, node.Summary,
+			node.KeyFacts, node.Decisions, node.Assumptions,
+			node.ArtifactRefs, node.Outputs, node.OpenQuestions,
+			node.Handoff, confidence,
+		)
+	}
 }
 
 // getTreeIndex 递归生成紧凑的树索引（enriched：含 result 摘要 + artifact refs）
@@ -1142,6 +1263,7 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		// 结构化摘要（优先 summary，向后兼容 result）
 		if action.Summary != "" {
 			parent.Result = action.Summary
+			parent.Summary = action.Summary
 		} else if action.Result != "" {
 			parent.Result = action.Result
 		}
@@ -1156,6 +1278,25 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 				parent.Variables[k] = v
 			}
 		}
+		// 扩展结构化交接字段
+		if action.Goal != "" {
+			parent.Goal = action.Goal
+		}
+		if len(action.Decisions) > 0 {
+			parent.Decisions = action.Decisions
+		}
+		if len(action.Assumptions) > 0 {
+			parent.Assumptions = action.Assumptions
+		}
+		if len(action.Outputs) > 0 {
+			parent.Outputs = action.Outputs
+		}
+		if len(action.OpenQuestions) > 0 {
+			parent.OpenQuestions = action.OpenQuestions
+		}
+		if action.Confidence != "" {
+			parent.Confidence = action.Confidence
+		}
 		// Node Report 结构化字段
 		if len(action.KeyFacts) > 0 {
 			parent.KeyFacts = action.KeyFacts
@@ -1165,6 +1306,9 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 			// Pin referenced artifacts
 			for _, ref := range action.ArtifactRefs {
 				r.artifacts.Pin(ref)
+				if r.memStore != nil {
+					_ = r.memStore.UpdateArtifactPinned(ref, true)
+				}
 			}
 		}
 		if action.Handoff != "" {
@@ -1174,12 +1318,25 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		if len(parent.KeyFacts) == 0 {
 			parent.KeyFacts = r.generateOperationLog(parent)
 		}
+		// 兜底 confidence
+		if parent.Confidence == "" {
+			if len(parent.KeyFacts) > 0 && parent.KeyFacts[0] != "" && !strings.HasPrefix(parent.KeyFacts[0], "[auto]") {
+				parent.Confidence = "medium"
+			} else {
+				parent.Confidence = "auto_generated"
+			}
+		}
 		// Pin artifacts if node is important
 		if parent.IsImportant {
 			for _, art := range r.artifacts.ListByNode(parent.ID) {
 				r.artifacts.Pin(art.ID)
+				if r.memStore != nil {
+					_ = r.memStore.UpdateArtifactPinned(art.ID, true)
+				}
 			}
 		}
+		// 同步到 SQLite
+		r.syncNodeToMemory(parent)
 		fmt.Printf("  ✅ Action: mark_complete (Result: %s)\n", parent.Result)
 		return nil
 	case "update_variables":
@@ -1190,6 +1347,31 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 			}
 			for k, v := range action.Variables {
 				parent.Variables[k] = v
+				// 同步到 SQLite scoped_variables
+				if r.memStore != nil {
+					valueRef := ""
+					valueSummary := ""
+					switch val := v.(type) {
+					case string:
+						if len(val) > 200 {
+							valueSummary = val[:200] + "..."
+						} else {
+							valueSummary = val
+						}
+						valueRef = val
+					default:
+						if b, err := json.Marshal(v); err == nil {
+							s := string(b)
+							if len(s) > 200 {
+								valueSummary = s[:200] + "..."
+							} else {
+								valueSummary = s
+							}
+							valueRef = s
+						}
+					}
+					_ = r.memStore.UpsertScopedVariable(parent.ID, parent.ID, k, valueRef, valueSummary)
+				}
 			}
 		}
 		if action.Result != "" {
@@ -1212,6 +1394,11 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		// 存入 Artifact Store
 		art := r.artifacts.Add("command", action.Command, result, parent.ID)
 		parent.Variables["last_command"] = art.ID
+		// 同步到 SQLite
+		if r.memStore != nil {
+			_ = r.memStore.UpsertArtifact(art.ID, parent.ID, art.Type, art.Source, art.Summary, art.SpillPath, art.Pinned)
+			_ = r.memStore.IndexArtifactFTS(art.ID, art.Source, art.Summary, result)
+		}
 
 		// 保留 command history 用于 agentic loop 上下文
 		if len(result) > MaxHistoryEntryLength {
@@ -1285,6 +1472,10 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		}
 		art := r.artifacts.Add("file_read", safePath, string(data), parent.ID)
 		parent.Variables["last_read"] = art.ID
+		if r.memStore != nil {
+			_ = r.memStore.UpsertArtifact(art.ID, parent.ID, art.Type, art.Source, art.Summary, art.SpillPath, art.Pinned)
+			_ = r.memStore.IndexArtifactFTS(art.ID, art.Source, art.Summary, string(data))
+		}
 		fmt.Printf("📖 read_file: %s → %s (%d bytes)\n", safePath, art.ID, len(data))
 		return nil
 	case "write_file":
@@ -1323,6 +1514,10 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		}
 		art := r.artifacts.Add("dir_list", safePath, strings.Join(lines, "\n"), parent.ID)
 		parent.Variables["last_list"] = art.ID
+		if r.memStore != nil {
+			_ = r.memStore.UpsertArtifact(art.ID, parent.ID, art.Type, art.Source, art.Summary, art.SpillPath, art.Pinned)
+			_ = r.memStore.IndexArtifactFTS(art.ID, art.Source, art.Summary, strings.Join(lines, "\n"))
+		}
 		fmt.Printf("📂 list_dir: %s → %s (%d entries)\n", safePath, art.ID, len(entries))
 		return nil
 	case "search":
@@ -1350,6 +1545,10 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		source := fmt.Sprintf("%s@%s", action.Content, safePath)
 		art := r.artifacts.Add("search", source, result, parent.ID)
 		parent.Variables["last_search"] = art.ID
+		if r.memStore != nil {
+			_ = r.memStore.UpsertArtifact(art.ID, parent.ID, art.Type, art.Source, art.Summary, art.SpillPath, art.Pinned)
+			_ = r.memStore.IndexArtifactFTS(art.ID, art.Source, art.Summary, result)
+		}
 		fmt.Printf("🔍 search: pattern=%q in %s → %s\n", action.Content, safePath, art.ID)
 		return nil
 	case "read_artifact":
@@ -1374,6 +1573,12 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		return nil
 	case "shutdown":
 		return fmt.Errorf("EMERGENCY_SHUTDOWN: %s", action.Result)
+	case "request_human_input":
+		return r.handleRequestHumanInput(action, parent)
+	case "append_sibling_node":
+		return r.handleAppendSiblingNode(action, parent)
+	case "query_memory":
+		return r.handleQueryMemory(action, parent)
 	default:
 		return fmt.Errorf("unknown action type: %s", action.ActionType)
 	}
@@ -1571,6 +1776,8 @@ func nodeStatusStr(s tasknode.TaskStatus) string {
 		return "Completed"
 	case tasknode.Failed:
 		return "Failed"
+	case tasknode.WaitingHuman:
+		return "WaitingHuman"
 	default:
 		return "Pending"
 	}

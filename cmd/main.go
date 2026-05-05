@@ -9,8 +9,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Steve65535/llmvm/pkg/artifact"
 	"github.com/Steve65535/llmvm/pkg/llm"
@@ -28,6 +30,7 @@ func main() {
 	// 0. 解析命令行参数
 	savePath := flag.String("save", "", "Path to save execution state (JSON)")
 	loadPath := flag.String("load", "", "Path to load execution state (JSON)")
+	resumeNode := flag.String("resume", "", "Node ID to resume (inject human response for WaitingHuman node)")
 	flag.Parse()
 
 	// 1. 初始化 LLM 引擎
@@ -100,12 +103,47 @@ func main() {
 	}
 
 	// 3. 创建运行时并执行
-	rt := runtime.NewRuntime(engine, root)
+	// 从 --save 路径派生 SQLite 文件名（foo.json → foo.sqlite）
+	dbPath := ""
+	if *savePath != "" {
+		ext := filepath.Ext(*savePath)
+		dbPath = strings.TrimSuffix(*savePath, ext) + ".sqlite"
+	} else if *loadPath != "" {
+		ext := filepath.Ext(*loadPath)
+		dbPath = strings.TrimSuffix(*loadPath, ext) + ".sqlite"
+	}
+	rt := runtime.NewRuntime(engine, root, dbPath)
 
 	// 恢复 artifact store（如果从保存点加载）
 	if savedArtifacts != nil {
 		rt.SetArtifacts(savedArtifacts)
 		fmt.Println("✅ Artifact store restored")
+	}
+
+	// --load 后重建 SQLite index，防止 .sqlite 丢失或过期
+	if *loadPath != "" {
+		fmt.Println("🔄 Rebuilding SQLite index from loaded state...")
+		if err := rt.RebuildIndexFromAST(); err != nil {
+			fmt.Printf("⚠️  SQLite rebuild failed: %v (continuing with AST fallback)\n", err)
+		} else {
+			fmt.Println("✅ SQLite index rebuilt")
+		}
+	}
+
+	// --resume：向 WaitingHuman 节点注入人类回复
+	if *resumeNode != "" {
+		resp := promptHumanResponse(*resumeNode)
+		if err := rt.ResumeWithHumanResponse(*resumeNode, resp); err != nil {
+			log.Fatalf("❌ Resume failed: %v", err)
+		}
+		fmt.Printf("✅ Injected human response for node [%s]\n", *resumeNode)
+	} else if *loadPath != "" {
+		// 自动检测树中是否有 WaitingHuman 节点
+		if waiting := findWaitingHumanNodes(root); len(waiting) > 0 {
+			fmt.Printf("⏸️  Found %d WaitingHuman node(s): %s\n", len(waiting), strings.Join(waiting, ", "))
+			fmt.Printf("   Use --resume <node-id> to inject a human response and continue.\n")
+			os.Exit(0)
+		}
 	}
 
 	// 保存辅助函数
@@ -180,6 +218,8 @@ func printTree(node *tasknode.TaskNode, indent int) {
 		status = "Completed"
 	case tasknode.Failed:
 		status = "Failed"
+	case tasknode.WaitingHuman:
+		status = "WaitingHuman"
 	}
 
 	fmt.Printf("%s[%s] %s (ID: %s, Status: %s, Traveled: %v, Finished: %v)\n",
@@ -194,4 +234,28 @@ func printTree(node *tasknode.TaskNode, indent int) {
 	for _, child := range node.Children {
 		printTree(child, indent+1)
 	}
+}
+
+// findWaitingHumanNodes 递归收集所有 WaitingHuman 节点的 ID。
+func findWaitingHumanNodes(node *tasknode.TaskNode) []string {
+	var ids []string
+	if node.Status == tasknode.WaitingHuman {
+		ids = append(ids, node.ID)
+	}
+	for _, child := range node.Children {
+		ids = append(ids, findWaitingHumanNodes(child)...)
+	}
+	return ids
+}
+
+// promptHumanResponse 从 stdin 读取人类回复（用于 --resume 流程）。
+func promptHumanResponse(nodeID string) *tasknode.HumanResponse {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Printf("🤚 Resuming node [%s] — enter your response:\n> ", nodeID)
+	value, _ := reader.ReadString('\n')
+	value = strings.TrimSpace(value)
+	fmt.Print("Optional note (press Enter to skip): ")
+	note, _ := reader.ReadString('\n')
+	note = strings.TrimSpace(note)
+	return &tasknode.HumanResponse{Value: value, Note: note, Timestamp: time.Now().Unix()}
 }

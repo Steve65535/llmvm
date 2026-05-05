@@ -221,6 +221,15 @@ func (s *Store) ListByNode(nodeID string) []*Artifact {
 	return result
 }
 
+// ListAll 返回所有 artifact（按加入顺序，最新在后）
+func (s *Store) ListAll() []*Artifact {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]*Artifact, len(s.artifacts))
+	copy(result, s.artifacts)
+	return result
+}
+
 // Index 返回紧凑索引供 prompt 使用（只有 ID + Type + Source + Summary）
 // maxEntries 限制条数，maxChars 限制总字符数，优先最近的
 func (s *Store) Index(maxEntries int, maxChars int) string {
