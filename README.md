@@ -16,18 +16,29 @@
     *   **LRU Eviction + Disk Spill**: Store holds up to 50 active artifacts. Large objects (>8KB) spill to disk. Evicted artifacts retain their summary as tombstones.
     *   **Pin Protection**: Important artifacts can be pinned to survive eviction.
 
+*   **SQLite Structured Memory** (`pkg/memory/`): A queryable retrieval index that mirrors the AST state. The AST remains the control-flow authority; SQLite is a secondary index for fast lookups.
+    *   Indexes nodes, structured handoffs, scoped variables, and artifacts (including FTS5 full-text search).
+    *   LLM can query it via the `query_memory` action — no extra API calls needed.
+    *   Auto-rebuilt from the AST on `--load` so the index is never stale after a restore.
+
 *   **Structured Node Handoff**: Every completed node produces a structured report:
     *   `summary`: What was accomplished
     *   `key_facts`: Key findings as a bullet list
+    *   `decisions`: Important choices made during this node
+    *   `assumptions`: Unverified assumptions made
+    *   `outputs`: Files, values, or state produced
+    *   `open_questions`: Known unresolved issues for downstream nodes
     *   `artifact_refs`: Referenced artifact IDs
     *   `handoff`: One-line guidance for downstream nodes
+    *   `confidence`: `"high"` / `"medium"` / `"low"` (auto-set to `"auto_generated"` if omitted)
     *   Runtime auto-generates operation logs as fallback if the LLM omits these fields.
 
-*   **Budget-Controlled Global Context**: Runtime auto-assembles context with hard character limits:
-    *   Tree index with result summaries (3K chars)
-    *   Artifact index (2K chars, 20 entries max)
-    *   Sibling handoffs (1K chars)
+*   **Budget-Controlled Global Context**: Runtime auto-assembles context with hard character limits derived proportionally from a total token budget:
+    *   Tree index with result summaries (5% of budget)
+    *   Artifact index (3% of budget, 20 entries max)
+    *   Sibling handoffs (2% of budget)
     *   Replaces the old `selectAttentionNodes` LLM call — zero extra API calls.
+    *   Total budget defaults to 64K tokens; override with `CONTEXT_BUDGET=<tokens>` env var.
 
 *   **Infinite Continuous Reasoning**: No hard iteration limit. Stagnation detection (3× identical responses) is the only safety valve, allowing arbitrarily long task chains.
 
@@ -49,6 +60,8 @@
 *   **Full Shell Injection**: Real shell execution (`sh -c`) with piping, redirection, and access to all host utilities.
 
 *   **State Persistence**: Full task tree + artifact store serialize to JSON. Supports `--save` / `--load` for resuming execution. Auto-saves on each step and on Ctrl+C. Spill files are validated on restore; missing ones gracefully degrade to tombstones.
+
+*   **Human-in-the-Loop**: The LLM can pause execution and request human input via `request_human_input`. The node enters `WaitingHuman` status, state is persisted, and execution resumes after the human responds. The runtime exposes a pluggable `HumanInputFunc` for custom integrations.
 
 *   **Autonomous Self-Correction**:
     *   **Stagnation Detection**: Identical responses trigger escalating intervention (warning → forced strategy change → node failure).
@@ -84,7 +97,8 @@ graph TD
 1.  **TaskTree**: A dynamic tree structure representing the program state. Nodes can be `Normal`, `Loop`, or `Leaf`.
 2.  **Cursor**: Tracks the current execution point, managing traversal and loop stacks.
 3.  **Artifact Store**: Manages tool results as stable-ID objects with summaries, eviction, and disk spill.
-4.  **Stateless Prompting**: The Runtime constructs a JSON-structured snapshot of the current node, global context (tree index + artifact index + sibling handoffs), and scoped variables.
+4.  **Memory Store**: SQLite index of nodes, handoffs, variables, and artifacts. Queryable by the LLM via `query_memory`; rebuilt automatically on `--load`.
+5.  **Stateless Prompting**: The Runtime constructs a JSON-structured snapshot of the current node, global context (tree index + artifact index + sibling handoffs), and scoped variables.
 
 ## 📦 Installation
 
@@ -95,10 +109,11 @@ go mod download
 ```
 
 ### 🔑 Environment Variables
-You must set your DeepSeek API key to use the live engine:
-```bash
-export DEEPSEEK_API_KEY="your_api_key_here"
-```
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | — | DeepSeek API key (required for live engine; falls back to `StubEngine` if unset) |
+| `CONTEXT_BUDGET` | `64000` | Total token budget; all sub-budgets (tool results, tree index, artifact index, handoffs) are derived proportionally |
 
 ## ⚡ Usage
 
@@ -128,13 +143,14 @@ go run cmd/main.go --load state.json
 ## 📂 Project Structure
 
 *   `cmd/`: CLI entry point with save/load support.
-*   `pkg/runtime/`: The core VM engine (The "CPU") — execution loop, global context assembly, sandbox enforcement, context compression.
+*   `pkg/runtime/`: The core VM engine (The "CPU") — execution loop, global context assembly, sandbox enforcement, context compression, human-in-the-loop handling.
 *   `pkg/cursor/`: Pointer logic and stack management.
-*   `pkg/tasknode/`: The data structure for the AST (The "Memory") — includes structured handoff fields.
+*   `pkg/tasknode/`: The data structure for the AST (The "Memory") — includes structured handoff fields and `WaitingHuman` status.
 *   `pkg/llm/`: Interface adapters for LLMs (The "ALU") — system prompt, action parsing, response validation.
 *   `pkg/artifact/`: Artifact Store — stable-ID information objects with LRU eviction, disk spill, and slice-based access.
+*   `pkg/memory/`: SQLite structured retrieval layer — queryable index of nodes, handoffs, scoped variables, and artifacts (FTS5).
 *   `pkg/vfs/`: Virtual filesystem (legacy).
-*   `visualizer/`: Tree visualization web server.
+*   `visualizer/`: Tree visualization web server with artifact panel.
 
 ## 🧪 Testing
 
@@ -147,6 +163,12 @@ go test ./pkg/llm/ -v
 
 # Artifact store tests (add, slice, eviction, pin, spill, index)
 go test ./pkg/artifact/ -v
+
+# SQLite memory store tests
+go test ./pkg/memory/ -v
+
+# Runtime integration tests
+go test ./pkg/runtime/ -v
 ```
 
 ## 📄 License

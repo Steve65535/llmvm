@@ -15,7 +15,8 @@
 | 上下文增长 | O(1)，每次调用固定大小 | O(n)，随步骤线性增长 |
 | 任务规划 | 显式 AST，可持久化/可视化 | 隐式，在 LLM 内部 |
 | 长任务能力 | 强（无上下文积累压力） | 弱（超长任务易退化） |
-| 信息管理 | Artifact Store + 结构化交接 | 对话历史 |
+| 信息管理 | Artifact Store + SQLite 结构化检索 + 结构化交接 | 对话历史 |
+| 人机协作 | 原生支持（`request_human_input` + `WaitingHuman`） | 依赖外部编排 |
 
 ## 🚀 核心亮点
 
@@ -38,6 +39,14 @@
 - 大于 8KB 的内容自动溢出磁盘
 - 重要 artifact 可 Pin 保护不被淘汰
 
+### SQLite 结构化记忆（`pkg/memory/`）
+
+AST 是控制流的权威来源；SQLite 是可查询的检索索引：
+
+- 索引节点元信息、结构化 handoff、作用域变量、artifact（含 FTS5 全文检索）
+- LLM 通过 `query_memory` action 直接查询，0 额外 API 调用
+- `--load` 恢复状态后自动从 AST 重建索引，防止 `.sqlite` 丢失或过期
+
 ### 结构化节点交接
 
 每个完成的节点产出标准化报告：
@@ -46,24 +55,29 @@
 {
   "summary": "完成了什么",
   "key_facts": ["关键发现1", "关键发现2"],
+  "decisions": ["做出的重要决策"],
+  "assumptions": ["未经验证的假设"],
+  "outputs": ["产出的文件或状态"],
+  "open_questions": ["下游节点需要关注的未解问题"],
   "artifact_refs": ["art_2", "art_5"],
-  "handoff": "下游节点需要知道什么"
+  "handoff": "下游节点需要知道什么",
+  "confidence": "high"
 }
 ```
 
-LLM 未提供时，Runtime 自动生成带 `[auto]` 前缀的操作日志作为兜底。
+LLM 未提供时，Runtime 自动生成带 `[auto]` 前缀的操作日志作为兜底。`confidence` 未提供时自动设为 `"auto_generated"`。
 
 ### 预算控制的全局上下文
 
 Runtime 自动组装全局上下文（0 额外 LLM 调用），替代旧的 `selectAttentionNodes`：
 
-| 组件 | 预算 |
+| 组件 | 预算（占总 token 预算比例） |
 |---|---|
-| 树索引（含 result 摘要 + artifact refs） | 3000 字符 |
-| Artifact 索引 | 2000 字符 / 20 条 |
-| 兄弟节点 Handoff | 1000 字符 |
+| 树索引（含 result 摘要 + artifact refs） | 5% |
+| Artifact 索引 | 3% / 最多 20 条 |
+| 兄弟节点 Handoff | 2% |
 
-大树自动裁剪：只保留祖先链 + 兄弟 + 最近 10 个已完成节点。
+总预算默认 64K tokens，可通过 `CONTEXT_BUDGET=<tokens>` 环境变量覆盖。大树自动裁剪：只保留祖先链 + 兄弟 + 最近 10 个已完成节点。
 
 ### 无限连续推理
 
@@ -106,11 +120,15 @@ API 返回上下文溢出时，Runtime 逐级压缩 prompt：
 # 保存（每步自动保存 + Ctrl+C 紧急保存）
 go run cmd/main.go --save state.json "你的任务"
 
-# 恢复（自动验证 spill 文件，缺失降级为墓碑）
+# 恢复（自动验证 spill 文件，缺失降级为墓碑；自动重建 SQLite 索引）
 go run cmd/main.go --load state.json
 ```
 
 向后兼容旧格式（纯 TaskNode JSON）。
+
+### 人机协作（Human-in-the-Loop）
+
+LLM 可通过 `request_human_input` action 暂停执行并请求人类输入。节点进入 `WaitingHuman` 状态，状态自动持久化，人类响应后继续执行。Runtime 提供可插拔的 `HumanInputFunc` 接口，方便自定义集成。
 
 ### 自主纠错
 
@@ -145,7 +163,8 @@ graph TD
 1. **TaskTree**：动态树结构，节点类型为 Normal / Loop / Leaf
 2. **Cursor**：DFS 读写头，管理遍历和循环栈
 3. **Artifact Store**：工具结果的结构化存储，带稳定 ID、LRU 淘汰、磁盘溢出
-4. **无状态提示**：Runtime 构建当前节点 + 全局上下文（树索引 + artifact 索引 + 兄弟 handoff）+ 作用域变量的 JSON 快照
+4. **Memory Store**：SQLite 检索索引，索引节点、handoff、变量、artifact（含 FTS5 全文检索）。LLM 通过 `query_memory` 查询；`--load` 后自动重建
+5. **无状态提示**：Runtime 构建当前节点 + 全局上下文（树索引 + artifact 索引 + 兄弟 handoff）+ 作用域变量的 JSON 快照
 
 ## 📦 安装
 
@@ -157,11 +176,10 @@ go mod download
 
 ### 环境变量
 
-```bash
-export DEEPSEEK_API_KEY="your_api_key_here"
-```
-
-未设置时自动回退到 `StubEngine`（测试模式）。
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | — | DeepSeek API Key（必填；未设置时回退到 `StubEngine` 测试模式） |
+| `CONTEXT_BUDGET` | `64000` | 总 token 预算；所有子预算（工具结果、树索引、artifact 索引、handoff）按比例派生 |
 
 ## ⚡ 使用
 
@@ -183,14 +201,17 @@ go run cmd/main.go --load state.json
 cmd/                  CLI 入口（含 save/load）
 pkg/
   runtime/            核心 VM 引擎（CPU）
-    runtime.go        主执行循环、全局上下文组装、沙箱强制、上下文压缩
+    runtime.go        主执行循环、全局上下文组装、沙箱强制、上下文压缩、人机协作
     agentic_loop.go   Leaf 节点自主循环逻辑
+    actions.go        action 处理器（含 query_memory、request_human_input、append_sibling_node）
+    activation.go     节点激活上下文构建
   cursor/             DFS 游标和栈管理
-  tasknode/           AST 节点数据结构（含结构化交接字段）
+  tasknode/           AST 节点数据结构（含结构化交接字段、WaitingHuman 状态）
   llm/                LLM 适配层（系统提示、action 解析、响应验证）
   artifact/           Artifact Store（稳定 ID、LRU 淘汰、磁盘溢出、分片读取）
+  memory/             SQLite 结构化检索层（节点/handoff/变量/artifact 索引，FTS5）
   vfs/                虚拟文件系统（遗留）
-visualizer/           树可视化 Web 服务器
+visualizer/           树可视化 Web 服务器（含 artifact 面板）
 markdown/             设计文档
 ```
 
@@ -205,6 +226,12 @@ go test ./pkg/llm/ -v
 
 # Artifact Store 测试
 go test ./pkg/artifact/ -v
+
+# SQLite 记忆层测试
+go test ./pkg/memory/ -v
+
+# Runtime 集成测试
+go test ./pkg/runtime/ -v
 ```
 
 ## 📄 许可证
