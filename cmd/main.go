@@ -1,126 +1,45 @@
+// Command llmvm 是 LLMVM 的 CLI 入口。
+//
+// main.go 只做编排：读 flag → 初始化 engine + state → 启动 Runtime → 落盘。
+// 各步骤的细节散在同包的其他文件：
+//
+//	state.go   — SaveState 序列化与 .json/.sqlite 路径派生
+//	engine.go  — LLM 引擎选择（API / Stub）
+//	signals.go — Ctrl+C / SIGTERM 紧急保存
+//	human.go   — WaitingHuman 节点扫描 + stdin 读人类回复
+//	tree.go    — 最终任务树打印
 package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
-	"os/signal"
-	"path/filepath"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/Steve65535/llmvm/pkg/artifact"
-	"github.com/Steve65535/llmvm/pkg/llm"
 	"github.com/Steve65535/llmvm/pkg/runtime"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 )
 
-// SaveState 持久化格式：包含任务树 + artifact store
-type SaveState struct {
-	Root      *tasknode.TaskNode `json:"root"`
-	Artifacts *artifact.Store    `json:"artifacts,omitempty"`
-}
-
 func main() {
-	// 0. 解析命令行参数
 	savePath := flag.String("save", "", "Path to save execution state (JSON)")
 	loadPath := flag.String("load", "", "Path to load execution state (JSON)")
 	resumeNode := flag.String("resume", "", "Node ID to resume (inject human response for WaitingHuman node)")
 	flag.Parse()
 
-	// 1. 初始化 LLM 引擎
-	var engine llm.Engine
-	apiEngine, err := llm.NewLLMEngine()
-	if err != nil {
-		fmt.Println("⚠️  Warning: LLM API not available, using StubEngine for testing")
-		engine = &llm.StubEngine{}
-	} else {
-		fmt.Println("✅ LLM Engine initialized successfully")
-		engine = apiEngine
-	}
+	engine := initEngine()
 
-	var root *tasknode.TaskNode
-	var initialRequest string
-	var savedArtifacts *artifact.Store
+	root, savedArtifacts, initialRequest := obtainRoot(*loadPath)
 
-	// 2. 加载或创建初始状态
-	if *loadPath != "" {
-		fmt.Printf("📂 Loading state from %s...\n", *loadPath)
-		data, err := ioutil.ReadFile(*loadPath)
-		if err != nil {
-			log.Fatalf("❌ Failed to read save file: %v", err)
-		}
-		var state SaveState
-		if err := json.Unmarshal(data, &state); err != nil {
-			// 向后兼容：尝试直接解析为 TaskNode
-			if err2 := json.Unmarshal(data, &root); err2 != nil {
-				log.Fatalf("❌ Failed to unmarshal state: %v", err)
-			}
-		} else {
-			root = state.Root
-			savedArtifacts = state.Artifacts
-		}
-		root.RestoreParents()
-		// 🔧 FIX(Defect 4): 防止 Information 为空时越界 panic
-		if len(root.Information) > 0 {
-			initialRequest = root.Information[0]
-		} else {
-			log.Fatalf("❌ Loaded state has no initial request in root.Information")
-		}
-		fmt.Println("✅ State loaded successfully")
-	} else {
-		// 获取用户命令
-		var command string
-		args := flag.Args()
-		if len(args) > 0 {
-			command = strings.Join(args, " ")
-			fmt.Printf("📝 Command from arguments: %s\n\n", command)
-		} else {
-			fmt.Println("🚀 LLMVM - Advanced Agent Runtime")
-			fmt.Println("==========================================")
-			fmt.Println("Enter your command (or 'exit' to quit):")
-			fmt.Print("> ")
-
-			reader := bufio.NewReader(os.Stdin)
-			input, err := reader.ReadString('\n')
-			if err != nil {
-				log.Fatalf("Failed to read input: %v", err)
-			}
-
-			command = strings.TrimSpace(input)
-			if command == "" || strings.ToLower(command) == "exit" {
-				return
-			}
-		}
-		initialRequest = command
-		root = tasknode.NewTaskNode("root", "Root Task", tasknode.Normal, []string{command})
-		root.SetStatus(tasknode.Running)
-	}
-
-	// 3. 创建运行时并执行
-	// 从 --save 路径派生 SQLite 文件名（foo.json → foo.sqlite）
-	dbPath := ""
-	if *savePath != "" {
-		ext := filepath.Ext(*savePath)
-		dbPath = strings.TrimSuffix(*savePath, ext) + ".sqlite"
-	} else if *loadPath != "" {
-		ext := filepath.Ext(*loadPath)
-		dbPath = strings.TrimSuffix(*loadPath, ext) + ".sqlite"
-	}
-	rt := runtime.NewRuntime(engine, root, dbPath)
-
-	// 恢复 artifact store（如果从保存点加载）
+	rt := runtime.NewRuntime(engine, root, derivedSQLitePath(*savePath, *loadPath))
 	if savedArtifacts != nil {
 		rt.SetArtifacts(savedArtifacts)
 		fmt.Println("✅ Artifact store restored")
 	}
 
-	// --load 后重建 SQLite index，防止 .sqlite 丢失或过期
+	// --load 后从 AST 重建 SQLite 索引，防止 .sqlite 丢失或过期。
 	if *loadPath != "" {
 		fmt.Println("🔄 Rebuilding SQLite index from loaded state...")
 		if err := rt.RebuildIndexFromAST(); err != nil {
@@ -130,64 +49,30 @@ func main() {
 		}
 	}
 
-	// --resume：向 WaitingHuman 节点注入人类回复
-	if *resumeNode != "" {
-		resp := promptHumanResponse(*resumeNode)
-		if err := rt.ResumeWithHumanResponse(*resumeNode, resp); err != nil {
-			log.Fatalf("❌ Resume failed: %v", err)
-		}
-		fmt.Printf("✅ Injected human response for node [%s]\n", *resumeNode)
-	} else if *loadPath != "" {
-		// 自动检测树中是否有 WaitingHuman 节点
-		if waiting := findWaitingHumanNodes(root); len(waiting) > 0 {
-			fmt.Printf("⏸️  Found %d WaitingHuman node(s): %s\n", len(waiting), strings.Join(waiting, ", "))
-			fmt.Printf("   Use --resume <node-id> to inject a human response and continue.\n")
-			os.Exit(0)
-		}
+	if !handleResume(rt, root, *resumeNode, *loadPath) {
+		return // resume 流程中已经决定退出（例如发现 WaitingHuman 等待用户）
 	}
 
-	// 保存辅助函数
-	saveState := func(path string) {
-		state := SaveState{Root: root, Artifacts: rt.GetArtifacts()}
-		data, _ := json.MarshalIndent(state, "", "  ")
-		ioutil.WriteFile(path, data, 0644)
-	}
-
-	// 🆕 增量保存支持
+	// 增量保存 + 紧急保存
 	if *savePath != "" {
 		rt.OnStepComplete = func(node *tasknode.TaskNode) {
 			fmt.Printf("💾 Autosaving state to %s...\n", *savePath)
-			saveState(*savePath)
+			persistState(*savePath, root, rt.GetArtifacts())
 		}
 	}
-
-	// 🆕 信号处理（Ctrl+C 自动保存）
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		fmt.Println("\n⚠️  Interrupted. Performing emergency save...")
-		if *savePath != "" {
-			saveState(*savePath)
-			fmt.Printf("✅ State saved to %s. Exiting.\n", *savePath)
-		}
-		os.Exit(0)
-	}()
+	installEmergencySaveHandler(*savePath, root, rt.GetArtifacts)
 
 	fmt.Println("🌳 Starting execution...")
 	if err := rt.Execute(initialRequest); err != nil {
 		fmt.Printf("❌ Execution error: %v\n", err)
-		// 即使出错也尝试保存状态
 	}
 
-	// 4. 如果指定了保存路径，则持久化
 	if *savePath != "" {
 		fmt.Printf("💾 Saving state to %s...\n", *savePath)
-		saveState(*savePath)
+		persistState(*savePath, root, rt.GetArtifacts())
 		fmt.Println("✅ State saved successfully")
 	}
 
-	// 5. 打印结果树
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", 60))
 	fmt.Println("✅ Final Syntax Tree:")
@@ -195,64 +80,77 @@ func main() {
 	printTree(root, 0)
 }
 
-// printTree 递归打印任务树
-func printTree(node *tasknode.TaskNode, indent int) {
-	prefix := ""
-	for i := 0; i < indent; i++ {
-		prefix += "  "
+// obtainRoot 根据 flag/args 决定是 --load 恢复还是新建 root。
+//
+// 返回 (root, 已保存的 artifact store 或 nil, 用户的初始请求字符串)。
+func obtainRoot(loadPath string) (*tasknode.TaskNode, *artifact.Store, string) {
+	if loadPath != "" {
+		root, arts, initialRequest := loadState(loadPath)
+		return root, arts, initialRequest
 	}
 
-	nodeType := "Normal"
-	if node.Type == tasknode.Leaf {
-		nodeType = "Leaf"
+	command := readCommandFromArgs()
+	if command == "" {
+		os.Exit(0)
 	}
 
-	status := "Pending"
-	switch node.Status {
-	case tasknode.Running:
-		status = "Running"
-	case tasknode.Completed:
-		status = "Completed"
-	case tasknode.Failed:
-		status = "Failed"
-	case tasknode.WaitingHuman:
-		status = "WaitingHuman"
-	}
-
-	fmt.Printf("%s[%s] %s (ID: %s, Status: %s, Traveled: %v, Finished: %v)\n",
-		prefix, nodeType, node.Name, node.ID, status, node.WetherTraveled, node.WetherFinished)
-
-	if len(node.Information) > 0 {
-		for _, info := range node.Information {
-			fmt.Printf("%s  Info: %s\n", prefix, info)
-		}
-	}
-
-	for _, child := range node.Children {
-		printTree(child, indent+1)
-	}
+	root := tasknode.NewTaskNode("root", "Root Task", tasknode.Normal, []string{command})
+	root.SetStatus(tasknode.Running)
+	return root, nil, command
 }
 
-// findWaitingHumanNodes 递归收集所有 WaitingHuman 节点的 ID。
-func findWaitingHumanNodes(node *tasknode.TaskNode) []string {
-	var ids []string
-	if node.Status == tasknode.WaitingHuman {
-		ids = append(ids, node.ID)
+// readCommandFromArgs 从命令行参数或交互模式读取用户的初始请求。
+func readCommandFromArgs() string {
+	args := flag.Args()
+	if len(args) > 0 {
+		command := strings.Join(args, " ")
+		fmt.Printf("📝 Command from arguments: %s\n\n", command)
+		return command
 	}
-	for _, child := range node.Children {
-		ids = append(ids, findWaitingHumanNodes(child)...)
-	}
-	return ids
-}
 
-// promptHumanResponse 从 stdin 读取人类回复（用于 --resume 流程）。
-func promptHumanResponse(nodeID string) *tasknode.HumanResponse {
+	fmt.Println("🚀 LLMVM - Advanced Agent Runtime")
+	fmt.Println("==========================================")
+	fmt.Println("Enter your command (or 'exit' to quit):")
+	fmt.Print("> ")
+
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf("🤚 Resuming node [%s] — enter your response:\n> ", nodeID)
-	value, _ := reader.ReadString('\n')
-	value = strings.TrimSpace(value)
-	fmt.Print("Optional note (press Enter to skip): ")
-	note, _ := reader.ReadString('\n')
-	note = strings.TrimSpace(note)
-	return &tasknode.HumanResponse{Value: value, Note: note, Timestamp: time.Now().Unix()}
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatalf("Failed to read input: %v", err)
+	}
+
+	command := strings.TrimSpace(input)
+	if command == "" || strings.ToLower(command) == "exit" {
+		return ""
+	}
+	return command
+}
+
+// handleResume 处理 --resume 流程，返回 false 表示 main 应该立即退出。
+//
+// 三种情况：
+//  1. 显式 --resume <id>：注入人类回复 → 继续 Execute（返回 true）
+//  2. --load 且树中有 WaitingHuman：提示用户用 --resume，退出（返回 false）
+//  3. 其它：直接进 Execute（返回 true）
+func handleResume(rt *runtime.Runtime, root *tasknode.TaskNode, resumeNode, loadPath string) bool {
+	if resumeNode != "" {
+		resp := promptHumanResponse(resumeNode)
+		if err := rt.ResumeWithHumanResponse(resumeNode, resp); err != nil {
+			log.Fatalf("❌ Resume failed: %v", err)
+		}
+		fmt.Printf("✅ Injected human response for node [%s]\n", resumeNode)
+		return true
+	}
+
+	if loadPath == "" {
+		return true
+	}
+
+	waiting := findWaitingHumanNodes(root)
+	if len(waiting) == 0 {
+		return true
+	}
+	fmt.Printf("⏸️  Found %d WaitingHuman node(s): %s\n", len(waiting), strings.Join(waiting, ", "))
+	fmt.Printf("   Use --resume <node-id> to inject a human response and continue.\n")
+	return false
 }

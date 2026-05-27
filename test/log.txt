@@ -1,0 +1,4 @@
+Runtime log placeholder.
+
+Real runtime logs and LLM conversation logs should stay local and are ignored by
+test/.gitignore.

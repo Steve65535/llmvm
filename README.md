@@ -1,237 +1,345 @@
 # LLMVM
 
-LLMVM is an experimental Go runtime for executing long-running LLM tasks as a recoverable task tree instead of a single growing chat transcript.
+**LLMVM is a position-aware, artifact-backed, acceptance-driven virtual machine for LLM-generated task programs.**
 
-The core idea is simple: treat the model call as a stateless decision step, and keep durable execution state in a runtime-owned structure. The task tree is the source of truth for control flow; artifacts and memory indexes provide evidence retrieval; prompts are rebuilt from the current node position on every step.
+It is not a chatbot loop with more tools. It is a Go runtime that executes long-running LLM tasks as a recoverable task tree. The model proposes structured actions; the runtime owns control flow, state, evidence, permissions, retrieval, and completion.
 
-> The LLM context window is treated like CPU registers, not disk. Each call receives the minimum useful state for the current position, while durable state lives in the task tree, artifacts, and rebuildable indexes.
+> Treat the LLM context window like CPU registers, not disk. Each model call receives only the minimum useful state for the current execution position. Durable state lives in the task tree, artifacts, and rebuildable indexes.
 
-## Why LLMVM Exists
+## The Idea
 
-Most agent loops accumulate conversation history until the context becomes expensive, noisy, or impossible to resume faithfully. LLMVM takes a different route:
+Most agents run as a single growing conversation:
 
-- The runtime owns control flow through an explicit task tree.
-- The model returns structured actions, not hidden control state.
-- Tool results are stored as artifacts with stable IDs.
-- SQLite memory is a queryable index, not the authority.
-- Saved JSON state can restore the execution tree and artifact metadata.
-- Human input is a first-class pause/resume state.
+```text
+user goal -> model -> tool -> observation -> append to history -> model -> ...
+```
 
-This makes LLMVM closer to a virtual machine for task execution than a chatbot wrapper.
+LLMVM runs as a virtual machine:
 
-## Current Capabilities
+```text
+fetch current node
+  -> build position
+  -> assemble context pack
+  -> call LLM as semantic ALU
+  -> parse JSON action DSL
+  -> validate authority and schema
+  -> execute action
+  -> commit state and artifacts
+  -> move cursor
+```
 
-### Explicit Task Tree Execution
+The difference is architectural. In LLMVM, state is not hidden inside chat history. State is explicit, serializable, inspectable, and recoverable.
 
-Tasks are represented as `TaskNode` objects and traversed by a DFS cursor. Nodes carry type, status, scoped variables, structured handoff fields, artifact references, and parent/child relationships.
+## VM Mapping
 
-The AST is authoritative. SQLite memory, prompt snapshots, and visualization data are derived from it.
+| Virtual machine concept | LLMVM component |
+|---|---|
+| Program | Task Tree / AST |
+| Instruction pointer | DFS Cursor |
+| Runtime / CPU | `pkg/runtime` |
+| Semantic ALU | LLM Engine |
+| Instruction set | JSON Action DSL |
+| Registers | Prompt snapshot for current node |
+| Memory | TaskNode variables and handoffs |
+| Evidence store | Artifact Store |
+| Query index | SQLite Memory + Vector Store |
+| Interrupt | Human-in-the-loop |
+| Permission ring | Position Authority |
+| Completion contract | Acceptance Criteria / Results |
+| Persistent image | SaveState JSON |
+| Debug view | Visualizer / future TUI |
 
-### Stateless Runtime Calls
+## Execution Model
 
-Each model call is built from a deterministic snapshot:
+LLMVM constructs the task program just-in-time. The root node starts with the user request. The model can create child nodes, append sibling nodes, produce artifacts, query memory, request context, call tools, and mark nodes complete.
 
-- Current node and objective.
-- Ancestor path and parent goal.
-- Sibling handoffs and open questions.
+The runtime is the authority:
+
+```text
+LLM proposes structure
+Runtime owns structure
+Cursor executes structure
+Artifacts preserve evidence
+Memory indexes evidence
+Acceptance verifies completion
+Handoff connects nodes
+```
+
+The current execution flow is:
+
+```text
+CLI start / load state
+  -> NewRuntime
+  -> Execute loop
+    -> current cursor node
+    -> BuildPosition
+    -> BuildContextPack
+    -> build prompt from embedded markdown templates
+    -> LLM call
+    -> ParseResponse
+    -> CheckAuthority
+    -> ExecuteAction dispatch
+    -> write TaskTree / Artifact / SQLite / Vector
+    -> decideNextStep
+    -> autosave hook
+```
+
+## Core Mechanisms
+
+### Task Tree as Program
+
+The task tree is the control-flow authority. Nodes carry:
+
+- Type: `Normal` or `Leaf`.
+- Status: pending, running, completed, failed, or waiting for human input.
 - Scoped variables.
-- Artifact summaries and selected retrieval results.
-- Runtime state such as retry/error context.
+- Structured handoff fields.
+- Artifact references.
+- Acceptance criteria and results.
+- Parent/child relationships restored after JSON load.
 
-The runtime does not depend on an ever-growing chat transcript. This is the foundation for resume, compaction, and long task execution.
+`Normal` nodes plan and coordinate. `Leaf` nodes execute atomic work and may enter an agentic refinement loop until completion criteria are met.
 
-### Structured Actions
+### Position Engineering
 
-The model communicates through a validated JSON action protocol. The parser and runtime validate actions instead of relying only on prompt instructions.
+A node does not receive a generic prompt. It receives a prompt built from its position in the task tree.
 
-Core actions include node creation/completion, file tools, artifact reads, memory queries, shell execution, sibling appends, and human input requests.
+`BuildPosition` derives:
 
-When changing action behavior, the full contract must stay aligned across:
+- Node ID, parent ID, depth, path, and sibling index.
+- Role: `root`, `planner`, `executor`, or `error_handler`.
+- Scope: what context should normally be visible.
+- Authority: which actions this position may emit.
+- Constraints: local rules such as required acceptance criteria.
 
-- `pkg/llm/api.go` for prompt/action documentation.
-- `pkg/llm/parser.go` for DTOs and validation.
-- `pkg/runtime/` for execution behavior.
-- `pkg/tasknode/`, `pkg/artifact/`, or `pkg/memory/` when state must persist.
+The runtime injects `## Position` and `## Allowed Actions` into the prompt, then enforces the same policy in `CheckAuthority` before executing any action.
 
-### Artifact Store
+### Context Pack
 
-Tool outputs and large reusable evidence are stored as artifacts instead of being copied into variables or prompts.
+Context is assembled by the runtime, not remembered by the model.
 
-Artifacts provide:
+The current pipeline is:
 
-- Stable IDs such as `art_1`, `art_2`, and `art_3`.
-- Summaries for compact prompt display.
-- Slice-based reads through `read_artifact`.
-- Pinning for important artifacts.
-- LRU-style active storage behavior.
-- Disk spill for large content.
-- Tombstone metadata when content is unavailable after restore.
+```text
+BuildPosition
+  -> buildNodeActivation
+  -> retrieval.Query
+  -> resolver.Resolve for large artifacts
+  -> format ContextPack
+```
 
-Variables and handoffs should reference artifact IDs rather than embedding large content.
+`NodeActivation` contributes deterministic context:
 
-### SQLite Structured Memory
+- Hierarchy path.
+- Parent goal.
+- Sibling handoffs.
+- Available artifact index.
+- Open questions.
+- Tree index.
 
-`pkg/memory/` maintains a SQLite-backed retrieval index over runtime state:
+`retrieval.Service` adds hybrid retrieval:
+
+- SQLite metadata filters.
+- SQLite FTS.
+- Vector search through chromem-go when available.
+- Deterministic merge and rerank.
+- Retrieval event and rerank trace logging.
+
+`resolver.Resolver` handles large artifacts by extracting evidence spans instead of putting the full content into the main prompt.
+
+### Artifact-Backed Memory
+
+Tool results and reusable evidence become artifacts:
+
+```text
+tool output -> artifact -> artifact ID -> variables / handoff / retrieval index
+```
+
+Artifacts have stable IDs, summaries, source metadata, scope, tags, granularity, importance, versions, supersession links, pinning, token counts, and spill-to-disk behavior.
+
+The DSL also supports first-class artifact actions:
+
+- `add_artifact`: create a reusable evidence unit.
+- `modify_artifact`: append a new version and mark the old artifact as superseded.
+- `read_artifact`: inspect a slice without loading the whole object.
+
+Variables and handoffs should reference artifact IDs rather than copying large content.
+
+### SQLite and Vector Indexes
+
+The task tree is the source of truth. SQLite and vector indexes are rebuildable retrieval mirrors.
+
+SQLite indexes:
 
 - Nodes.
-- Structured handoffs.
+- Handoffs.
 - Scoped variables.
-- Artifact metadata.
-- Full-text searchable artifact records.
+- Artifacts and FTS records.
+- Acceptance criteria and results.
+- Retrieval/rerank events.
 
-The task tree remains the authority. SQLite is rebuildable and exists to make retrieval deterministic, inspectable, and cheap. The model can query it through constrained `query_memory` modes such as ancestor chains, sibling handoffs, recent artifacts, pinned artifacts, and FTS artifact search.
+Vector storage is optional. If it is unavailable, retrieval falls back to FTS. If SQLite is unavailable, the runtime degrades instead of losing the task tree.
 
-### Structured Handoffs
+### JSON Action DSL
 
-Completed nodes can produce a structured handoff:
+The model returns one JSON object:
 
 ```json
 {
-  "summary": "What was completed",
-  "key_facts": ["Important facts discovered"],
-  "decisions": ["Important choices made"],
-  "assumptions": ["Unverified assumptions"],
-  "outputs": ["Files, values, or state produced"],
-  "open_questions": ["Issues downstream nodes should know"],
-  "artifact_refs": ["art_2", "art_5"],
-  "handoff": "One-line downstream guidance",
-  "confidence": "high"
+  "actions": [
+    {
+      "action_type": "create_node",
+      "node": {
+        "id": "inspect_runtime",
+        "name": "Inspect Runtime",
+        "type": "Leaf",
+        "information": "Read pkg/runtime and summarize the execution loop"
+      }
+    }
+  ]
 }
 ```
 
-This gives downstream nodes a compact, typed contract instead of forcing them to infer progress from raw history.
+The runtime parses, validates, authority-checks, and dispatches actions. `ExecuteAction` is intentionally a Go switch-based DSL interpreter: easy to inspect, easy to test, and strict at the side-effect boundary.
 
-### Runtime Safeguards
+Supported action families include:
 
-LLMVM includes runtime-level safeguards:
+- Tree mutation: `create_node`, `append_sibling_node`, `mark_complete`.
+- State update: `update_variables`.
+- Tools: `execute_command`, `read_file`, `write_file`, `append_to_file`, `list_dir`, `search`.
+- Artifacts: `add_artifact`, `modify_artifact`, `read_artifact`.
+- Retrieval: `query_memory`, `request_context`.
+- Human interaction: `request_human_input`.
+- Control: `shutdown`.
 
-- File tool sandboxing under `test/sandbox/`.
-- Separator-aware path validation.
-- Error feedback to the model.
-- Stagnation detection for repeated identical responses.
-- Context overflow recovery through progressive compression.
-- Save/load state persistence.
-- Ctrl+C save behavior when configured.
-- Human-in-the-loop pause and resume through `WaitingHuman`.
+### Acceptance-Driven Completion
 
-Shell execution is intentionally broader than file tools. Treat it as powerful host access and keep that distinction explicit.
+Loop nodes have been removed from the DSL. Iteration is expressed through acceptance criteria and retry budgets.
 
-## Position Engineering
+A node may define criteria:
 
-The main architectural direction in `markdown/position_engineering_deep_refactor.md` is to promote "position" into a first-class runtime concept.
-
-Position engineering means that a node should not merely receive a generic context bundle. It should understand:
-
-- Where it is in the task tree.
-- What role it has at that position.
-- What scope it is responsible for.
-- Which actions it is allowed to take.
-- Which evidence it should retrieve.
-- What handoff it must produce.
-
-In other words:
-
-```text
-Position -> Context Needs -> Retrieval Plan -> Context Pack -> Decision -> Handoff
+```json
+{
+  "description": "go test ./pkg/llm passes",
+  "required": true,
+  "check_type": "testable",
+  "check_command": "go test ./pkg/llm"
+}
 ```
 
-The planned runtime vocabulary is:
+To complete, the model must provide `acceptance_results`. For `testable` checks, the runtime executes the command and overrides the model's self-report if the real exit code disagrees.
 
-- `Position`: node ID, parent, depth, path, sibling index, role, scope, authority, constraints.
-- `ContextNeed`: what this position needs to know.
-- `ContextPlan`: which providers to query and with what budget.
-- `ContextProvider`: memory, artifact, tree state, runtime state, VFS, future vector stores.
-- `ContextPack`: sorted, deduplicated, compressed, budgeted context for the model call.
-- `AuthorityDescriptor`: runtime-enforced action permissions for this position.
+Completion is therefore:
 
-The current code already has pieces of this through node activation, structured memory, artifacts, and handoffs. The next step is to make position policy explicit instead of leaving it spread across prompt text and helper functions.
+```text
+model proposes completion
+  -> runtime verifies required acceptance
+  -> handoff is written
+  -> artifacts are pinned/indexed
+  -> cursor moves on
+```
 
-## RAG and Artifact Roadmap
+### Human-in-the-Loop
 
-`markdown/rag_artifact_position_engineering_experiment.md` sketches a higher-risk architecture experiment: moving from "task tree plus prompt assembly" toward "task tree plus artifact handoff, retrievable memory, and acceptance-driven nodes."
+`request_human_input` is a runtime interrupt:
 
-Planned directions include:
+```text
+request_human_input
+  -> node.Status = WaitingHuman
+  -> state is saved
+  -> user resumes with --resume <node-id>
+  -> human response is injected
+  -> execution continues
+```
 
-- Make artifacts a first-class DSL object through an `add_artifact` action.
-- Store fine-grained artifact metadata in SQLite and, later, a vector index.
-- Add hybrid retrieval: metadata filters, SQLite FTS, vector search, merge, rerank, context-pack building.
-- Replace fixed context percentages with a global token limit and relevance-driven packing.
-- Add large-artifact resolvers that extract only the evidence needed by the current node.
-- Introduce acceptance criteria and acceptance results for node completion.
-- Eventually deprecate structural loop nodes in favor of retry budgets plus explicit acceptance checks.
-- Strengthen JSON output handling with extraction, schema validation, typed parse errors, and provider-level JSON/schema modes where available.
+This makes human intervention durable rather than an ephemeral terminal prompt.
 
-This roadmap is intentionally separated from current implementation status. It describes where the runtime is heading, not all features that are already complete.
+## Runtime Package Layout
 
-## Terminal UI Roadmap
+`pkg/runtime` is intentionally split around one `Runtime` object:
 
-`markdown/terminal_ui_plan.md` proposes a TUI for making long-running executions observable and interruptible.
+| File | Responsibility |
+|---|---|
+| `runtime.go` | `Runtime` struct, `NewRuntime`, lifecycle helpers |
+| `execute.go` | Main DFS execution loop, retry, stagnation, cursor movement |
+| `dispatch.go` | Action DSL dispatch and core handlers |
+| `position.go` | Position, role, scope, authority policy |
+| `activation.go` | NodeActivation and ContextPack pipeline |
+| `context_assembly.go` | Global context, tree index, workspace compatibility |
+| `prompt.go` | Prompt construction from runtime state |
+| `prompt_template.go` | Embedded node prompt template |
+| `index.go` | SQLite rebuild/sync and vector indexing |
+| `shell.go` | Shell execution and file-tool sandbox checks |
+| `actions.go` | Special actions: human input, memory, artifacts, context, acceptance |
+| `agentic_loop.go` | Leaf refinement loop |
+| `budget.go` | Context and retrieval budget config |
+| `tokens.go` | Token estimate, compression, operation-log fallback |
 
-The planned TUI is a developer cockpit for:
-
-- Starting tasks.
-- Watching the current cursor position.
-- Inspecting the AST.
-- Reading artifact summaries and slices.
-- Viewing memory query results.
-- Responding to human-input requests.
-- Tracking retries, context compression, errors, and save/load state.
-
-The recommended stack is Go-native: Bubble Tea, Bubbles, Lip Gloss, and Glamour. The TUI is planned as an addition to the existing CLI, not a replacement.
+This keeps `runtime.go` as the composition root, while execution behavior lives in focused files.
 
 ## Architecture
 
 ```mermaid
 graph TD
-    User["User task"] --> CLI["CLI / future TUI"]
-    CLI --> Runtime["Runtime"]
+    User["User task"] --> CLI["CLI"]
+    CLI --> Runtime["Runtime Kernel"]
 
     Runtime <--> Cursor["DFS Cursor"]
     Cursor <--> Tree["Task Tree / AST"]
+
+    Runtime --> Position["BuildPosition"]
+    Position --> ContextPack["ContextPack"]
+    ContextPack <--> Memory["SQLite Memory"]
+    ContextPack <--> Vector["Vector Store"]
+    ContextPack <--> Resolver["Artifact Resolver"]
+
     Runtime <--> Artifacts["Artifact Store"]
-    Runtime <--> Memory["SQLite Memory Index"]
-    Runtime --> Prompt["Deterministic Prompt Snapshot"]
+    Runtime --> Prompt["Embedded Prompt Templates"]
+    Prompt --> LLM["LLM Engine"]
+    LLM --> Parser["JSON Parser"]
+    Parser --> Dispatch["Action Dispatch"]
+    Dispatch --> Runtime
 
-    Prompt --> LLM["LLM Provider"]
-    LLM --> Parser["JSON Parser / Validator"]
-    Parser --> Runtime
-
-    Runtime --> State["Saved JSON State"]
-    Runtime --> Human["Human Input Hook"]
+    Runtime --> Save["SaveState JSON"]
+    Runtime --> Human["Human Interrupt"]
 ```
 
-Key packages:
+## Project Structure
 
-- `cmd/`: CLI entry point, flags, save/load, runtime bootstrap.
-- `pkg/runtime/`: execution loop, prompt construction, action execution, sandbox enforcement, context handling, memory synchronization.
-- `pkg/llm/`: provider API types, system prompt, parser, validation, engine wrappers.
-- `pkg/tasknode/`: task tree model, node status, variables, handoffs, human request/response payloads, restore helpers.
-- `pkg/cursor/`: DFS traversal and loop-related cursor state.
-- `pkg/artifact/`: artifact store, summaries, slicing, eviction, pinning, disk spill.
-- `pkg/memory/`: SQLite index and constrained retrieval queries.
-- `pkg/vfs/`: legacy virtual filesystem code.
-- `visualizer/`: Go visualization server.
-- `visualizer/frontend/`: Vite + React frontend for inspecting saved runtime state.
-- `markdown/`: design notes and experimental architecture documents. This directory is currently gitignored.
-
-## Installation
-
-```bash
-git clone https://github.com/Steve65535/llmvm.git
-cd llmvm
-go mod download
-```
+- `cmd/`: CLI orchestration, engine selection, state load/save, signals, human resume, final tree print.
+- `pkg/runtime/`: VM kernel, execution loop, context assembly, action dispatch, authority checks, indexing, sandboxing.
+- `pkg/llm/`: LLM provider wrapper, embedded system prompt, action DTOs, JSON parser.
+- `pkg/tasknode/`: Task tree model, structured handoff, acceptance state, human request/response state.
+- `pkg/cursor/`: DFS cursor and traversal state.
+- `pkg/artifact/`: Artifact store, slicing, spill, pinning, structured metadata.
+- `pkg/memory/`: SQLite schema, indexing, constrained queries, FTS, retrieval traces.
+- `pkg/retrieval/`: Hybrid FTS/vector retrieval and deterministic rerank.
+- `pkg/vector/`: Optional chromem-go vector index.
+- `pkg/resolver/`: Large-artifact evidence extraction.
+- `pkg/vfs/`: Legacy virtual filesystem code.
+- `visualizer/`: Saved-state visualization server and frontend.
+- `markdown/`: Design notes and architecture experiments.
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---:|---|
-| `DEEPSEEK_API_KEY` | unset | DeepSeek API key for live model calls. If unset, use the available stub/test flow. |
-| `CONTEXT_BUDGET` | `64000` | Total context budget used by current runtime prompt assembly. |
-
-Planned TUI and retrieval experiments may introduce additional `LLMVM_*` variables. See the design documents in `markdown/` for proposed names.
+| `DEEPSEEK_API_KEY` | unset | DeepSeek API key. If unset, the CLI falls back to `StubEngine`. |
+| `LLMVM_CONTEXT_TOKEN_LIMIT` | `200000` | Total prompt budget used by the current runtime. |
+| `CONTEXT_BUDGET` | fallback alias | Backward-compatible alias for the context limit. |
+| `LLMVM_RETRIEVAL_TOKEN_LIMIT` | half of context limit | Budget for retrieval candidates. |
+| `LLMVM_ARTIFACT_INLINE_TOKEN_LIMIT` | `6000` | Inline/resolver evidence budget for large artifacts. |
+| `LLMVM_ARTIFACT_ASYNC_TOKEN_THRESHOLD` | `12000` | Reserved threshold for async artifact resolver behavior. |
+| `LLMVM_COMMAND_RESULT_CHARS` | `8000` | Max chars surfaced from command/artifact slices. |
+| `LLMVM_VECTOR_DIR` | derived from save path | Optional chromem-go vector store directory. |
 
 ## Usage
+
+Install dependencies:
+
+```bash
+go mod download
+```
 
 Run a task:
 
@@ -239,7 +347,7 @@ Run a task:
 go run cmd/main.go "Analyze this repository and summarize its architecture"
 ```
 
-Run in interactive mode:
+Run interactively:
 
 ```bash
 go run cmd/main.go
@@ -252,14 +360,20 @@ go run cmd/main.go --save state.json "Run a complex task"
 go run cmd/main.go --load state.json
 ```
 
-Run the visualizer server against a saved state:
+Resume a waiting human-input node:
+
+```bash
+go run cmd/main.go --load state.json --resume node_id
+```
+
+Run the visualizer:
 
 ```bash
 cd visualizer
 go run server.go -file ../deep_compiler.json
 ```
 
-Run the visualizer frontend:
+Run the frontend:
 
 ```bash
 cd visualizer/frontend
@@ -274,7 +388,7 @@ Run all Go tests:
 go test ./...
 ```
 
-Run focused tests:
+Focused checks:
 
 ```bash
 go test ./pkg/llm -v
@@ -283,7 +397,7 @@ go test ./pkg/artifact -v
 go test ./pkg/memory -v
 ```
 
-Run frontend checks:
+Frontend checks:
 
 ```bash
 cd visualizer/frontend
@@ -291,17 +405,30 @@ npm run lint
 npm run build
 ```
 
-Use `gofmt` for Go files. Keep behavior deterministic: stable ordering matters for prompt cache behavior, reproducible tests, saved state, and visualizer output.
+## Design Status
 
-## Design Principles
+Implemented or partially implemented:
 
-- The task tree is the authority for execution state.
-- SQLite memory is a rebuildable retrieval index.
-- Artifacts carry evidence; variables and handoffs carry references.
-- Runtime validation is required at parser and action execution boundaries.
-- Context should be selected by position, relevance, and budget, not by chat history inertia.
-- Long-running tasks must be observable, resumable, and inspectable.
-- Future RAG/vector features should be added behind interfaces, not hard-wired into runtime control flow.
+- Task tree execution.
+- Position and authority checks.
+- Embedded prompt templates.
+- Artifact store with structured metadata.
+- SQLite memory and FTS.
+- Optional vector retrieval.
+- ContextPack pipeline.
+- Large-artifact resolver.
+- Acceptance criteria and runtime testable checks.
+- Human-in-the-loop pause/resume.
+- Save/load state.
+
+Still evolving:
+
+- More precise parser diagnostics.
+- Cleaner budget ownership inside ContextPack.
+- Stronger ContextProvider abstractions.
+- More complete acceptance semantics for manual and LLM-judge checks.
+- TUI cockpit.
+- Provider-level JSON/schema output constraints.
 
 ## License
 

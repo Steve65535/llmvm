@@ -1,239 +1,345 @@
 # LLMVM
 
-LLMVM 是一个用 Go 编写的实验性 LLM 运行时。它的目标不是再做一个持续堆聊天历史的 Agent，而是把长任务执行成一棵可恢复、可检索、可观察的任务树。
+**LLMVM 是一个位置感知、Artifact 驱动、验收约束的 LLM 任务程序虚拟机。**
 
-核心思想是：模型每次只做一次无状态决策，真正的执行状态由 runtime 持久化管理。任务树负责控制流，Artifact 负责保存证据，SQLite Memory 负责检索索引，Prompt 每一步都从当前节点的位置重新构建。
+它不是“带更多工具的聊天 Agent”。它是一个 Go runtime，用可恢复的任务树执行长任务。模型负责提出结构化动作；runtime 负责控制流、状态、证据、权限、检索和完成判定。
 
-> 把 LLM 的上下文窗口当作 CPU 寄存器，而不是磁盘。每次调用只加载当前位置需要的最小充分上下文，持久状态放在任务树、Artifact 和可重建索引里。
+> 把 LLM 的上下文窗口当作 CPU 寄存器，而不是磁盘。每次模型调用只加载当前位置需要的最小充分状态。持久状态放在任务树、Artifact 和可重建索引里。
 
-## 为什么需要 LLMVM
+## 核心理念
 
-常见 Agent loop 会不断累积对话历史。任务一长，上下文就会变贵、变脏、难压缩，也很难可靠恢复。
+常见 Agent 通常是一条不断增长的对话：
 
-LLMVM 走另一条路线：
+```text
+用户目标 -> 模型 -> 工具 -> 观察结果 -> 追加到历史 -> 模型 -> ...
+```
 
-- Runtime 通过显式任务树掌控控制流。
-- 模型输出结构化 action，而不是把控制状态藏在自然语言里。
-- 工具结果保存为带稳定 ID 的 Artifact。
-- SQLite Memory 是查询索引，不是状态权威。
-- JSON 状态可以保存和恢复任务树与 Artifact 元数据。
-- 人类输入是原生的暂停 / 恢复状态。
+LLMVM 更像一台虚拟机：
 
-因此 LLMVM 更像一个面向任务执行的虚拟机，而不是聊天机器人外壳。
+```text
+取当前节点
+  -> 构造 Position
+  -> 组装 ContextPack
+  -> 调用 LLM 作为语义 ALU
+  -> 解析 JSON Action DSL
+  -> 校验 schema 和权限
+  -> 执行动作
+  -> 提交状态和 Artifact
+  -> 移动 Cursor
+```
 
-## 当前能力
+关键区别是：**状态不藏在聊天历史里。状态是显式的、可序列化的、可检查的、可恢复的。**
 
-### 显式任务树执行
+## VM 映射
 
-任务由 `TaskNode` 表示，并由 DFS Cursor 遍历执行。节点保存类型、状态、作用域变量、结构化 handoff、artifact 引用以及父子关系。
+| 虚拟机概念 | LLMVM 对应物 |
+|---|---|
+| 程序 | Task Tree / AST |
+| 指令指针 | DFS Cursor |
+| Runtime / CPU | `pkg/runtime` |
+| 语义 ALU | LLM Engine |
+| 指令集 | JSON Action DSL |
+| 寄存器 | 当前节点的 Prompt 快照 |
+| 内存 | TaskNode variables / handoff |
+| 证据存储 | Artifact Store |
+| 查询索引 | SQLite Memory + Vector Store |
+| 中断 | Human-in-the-loop |
+| 权限环 | Position Authority |
+| 完成契约 | Acceptance Criteria / Results |
+| 持久化镜像 | SaveState JSON |
+| 调试视图 | Visualizer / 未来 TUI |
 
-AST / 任务树是权威状态。SQLite Memory、Prompt 快照和可视化数据都应该从任务树派生。
+## 执行模型
 
-### 无状态模型调用
+LLMVM 的任务程序是即时构造的。Root 节点来自用户请求。模型可以创建子节点、追加同级节点、产出 Artifact、查询 Memory、请求上下文、调用工具，并最终标记节点完成。
 
-每次模型调用都由 runtime 构造确定性快照：
+Runtime 才是权威：
 
-- 当前节点和目标。
-- 祖先路径和父节点目标。
-- 兄弟节点 handoff 与 open questions。
+```text
+LLM 提出结构
+Runtime 拥有结构
+Cursor 执行结构
+Artifact 保存证据
+Memory 索引证据
+Acceptance 验证完成
+Handoff 连接节点
+```
+
+当前执行流是：
+
+```text
+CLI 启动 / 加载状态
+  -> NewRuntime
+  -> Execute 主循环
+    -> 当前 Cursor 节点
+    -> BuildPosition
+    -> BuildContextPack
+    -> 从内嵌 markdown 模板构造 Prompt
+    -> LLM 调用
+    -> ParseResponse
+    -> CheckAuthority
+    -> ExecuteAction dispatch
+    -> 写入 TaskTree / Artifact / SQLite / Vector
+    -> decideNextStep
+    -> autosave hook
+```
+
+## 核心机制
+
+### Task Tree 即程序
+
+任务树是控制流权威。节点保存：
+
+- 类型：`Normal` 或 `Leaf`。
+- 状态：pending、running、completed、failed、waiting human。
 - 作用域变量。
-- Artifact 摘要和选中的检索结果。
-- retry、错误、压缩等 runtime 状态。
-
-Runtime 不依赖持续增长的聊天记录。这是恢复执行、上下文压缩和长任务运行的基础。
-
-### 结构化 Action 协议
-
-模型通过经过验证的 JSON action 协议与 runtime 通信。Parser 和 runtime 会验证 action，而不是只依赖 prompt 约束。
-
-核心 action 包括节点创建 / 完成、文件工具、Artifact 读取、Memory 查询、Shell 执行、追加同级节点和请求人类输入。
-
-修改 action 行为时必须同步更新完整路径：
-
-- `pkg/llm/api.go`：系统提示和 action 文档。
-- `pkg/llm/parser.go`：DTO 和校验。
-- `pkg/runtime/`：实际执行逻辑。
-- `pkg/tasknode/`、`pkg/artifact/` 或 `pkg/memory/`：需要持久化的新状态。
-
-### Artifact Store
-
-工具输出和可复用证据默认进入 Artifact，而不是复制进变量或 Prompt。
-
-Artifact 支持：
-
-- `art_1`、`art_2`、`art_3` 这样的稳定 ID。
-- 用于 Prompt 展示的摘要。
-- 通过 `read_artifact` 分片读取。
-- 重要 Artifact 的 pin 保护。
-- 活跃存储的 LRU 行为。
-- 大内容磁盘 spill。
-- 恢复后内容缺失时保留墓碑元数据。
-
-变量和 handoff 应引用 Artifact ID，而不是嵌入大段内容。
-
-### SQLite 结构化 Memory
-
-`pkg/memory/` 维护 SQLite 检索索引，覆盖：
-
-- 节点。
 - 结构化 handoff。
-- 作用域变量。
-- Artifact 元数据。
-- 可全文检索的 Artifact 记录。
+- Artifact 引用。
+- 验收标准和验收结果。
+- JSON load 后可恢复的父子关系。
 
-任务树仍然是权威来源。SQLite 是可重建索引，用来提供确定、可检查、低成本的检索。模型可以通过受限的 `query_memory` 模式查询，例如祖先链、兄弟 handoff、最近 Artifact、Pinned Artifact 和 FTS Artifact 搜索。
+`Normal` 节点负责规划和协调。`Leaf` 节点负责原子执行，并可进入 agentic refinement loop，直到满足完成条件。
 
-### 结构化 Handoff
+### 位置工程
 
-完成节点可以输出结构化 handoff：
+节点不会拿到一包通用 prompt。它拿到的是由自己在任务树中的位置决定的 prompt。
+
+`BuildPosition` 推导：
+
+- Node ID、Parent ID、深度、路径、兄弟序号。
+- Role：`root`、`planner`、`executor`、`error_handler`。
+- Scope：默认可见的上下文范围。
+- Authority：当前位置允许输出哪些 action。
+- Constraints：例如必须满足的验收标准。
+
+Runtime 把 `## Position` 和 `## Allowed Actions` 注入 prompt，并在执行前用 `CheckAuthority` 强制校验同一套策略。
+
+### Context Pack
+
+上下文由 runtime 组装，不由模型记忆。
+
+当前 pipeline：
+
+```text
+BuildPosition
+  -> buildNodeActivation
+  -> retrieval.Query
+  -> resolver.Resolve for large artifacts
+  -> format ContextPack
+```
+
+`NodeActivation` 提供确定性上下文：
+
+- 层级路径。
+- 父节点目标。
+- 兄弟 handoff。
+- 可用 Artifact 索引。
+- Open questions。
+- Tree index。
+
+`retrieval.Service` 提供混合检索：
+
+- SQLite metadata filter。
+- SQLite FTS。
+- 可选 chromem-go vector search。
+- 确定性 merge 和 rerank。
+- retrieval event 与 rerank trace 记录。
+
+`resolver.Resolver` 处理大 Artifact：只抽取和当前目标相关的证据片段，而不是把全文塞进主 prompt。
+
+### Artifact 驱动记忆
+
+工具结果和可复用证据默认进入 Artifact：
+
+```text
+工具输出 -> Artifact -> Artifact ID -> variables / handoff / retrieval index
+```
+
+Artifact 具有稳定 ID、摘要、来源元数据、scope、tags、granularity、importance、版本、supersedes、pin、token count 和 spill-to-disk 行为。
+
+DSL 也支持一等 Artifact action：
+
+- `add_artifact`：创建可复用证据单元。
+- `modify_artifact`：追加新版本，并把旧 Artifact 标记为 superseded。
+- `read_artifact`：按切片读取内容，避免加载全文。
+
+变量和 handoff 应引用 Artifact ID，而不是复制大段内容。
+
+### SQLite 与 Vector 索引
+
+任务树是事实来源。SQLite 和 Vector 是可重建的检索镜像。
+
+SQLite 索引：
+
+- Nodes。
+- Handoffs。
+- Scoped variables。
+- Artifacts 与 FTS 记录。
+- Acceptance criteria / results。
+- Retrieval / rerank events。
+
+Vector 存储是可选的。不可用时 retrieval 回退到 FTS。SQLite 不可用时 runtime 也会降级，而不是丢失任务树。
+
+### JSON Action DSL
+
+模型必须返回一个 JSON 对象：
 
 ```json
 {
-  "summary": "完成了什么",
-  "key_facts": ["关键事实"],
-  "decisions": ["重要决策"],
-  "assumptions": ["未经验证的假设"],
-  "outputs": ["产出的文件、值或状态"],
-  "open_questions": ["下游节点需要知道的未解问题"],
-  "artifact_refs": ["art_2", "art_5"],
-  "handoff": "给下游节点的一句话交接",
-  "confidence": "high"
+  "actions": [
+    {
+      "action_type": "create_node",
+      "node": {
+        "id": "inspect_runtime",
+        "name": "Inspect Runtime",
+        "type": "Leaf",
+        "information": "Read pkg/runtime and summarize the execution loop"
+      }
+    }
+  ]
 }
 ```
 
-这让下游节点读取紧凑、类型化的交接结果，而不是从原始历史里猜测进度。
+Runtime 会解析、校验、权限检查并 dispatch action。`ExecuteAction` 有意保留 Go switch 作为 DSL interpreter：容易阅读、容易测试，并且在副作用边界保持严格。
 
-### Runtime 保护机制
+Action 家族包括：
 
-LLMVM 包含 runtime 层面的保护：
+- 树变更：`create_node`、`append_sibling_node`、`mark_complete`。
+- 状态更新：`update_variables`。
+- 工具：`execute_command`、`read_file`、`write_file`、`append_to_file`、`list_dir`、`search`。
+- Artifact：`add_artifact`、`modify_artifact`、`read_artifact`。
+- 检索：`query_memory`、`request_context`。
+- 人类协作：`request_human_input`。
+- 控制：`shutdown`。
 
-- 文件工具限制在 `test/sandbox/` 下。
-- 分隔符感知的路径校验。
-- 将错误反馈给模型以便自我修正。
-- 检测连续相同响应导致的停滞。
-- 上下文溢出时逐级压缩。
-- 保存 / 加载状态。
-- 配置保存路径时支持 Ctrl+C 保存。
-- `WaitingHuman` 状态支持人类介入后继续执行。
+### 验收驱动完成
 
-Shell 执行的能力比文件工具更大。它是显式的主机级能力，和受沙箱限制的文件工具不同。
+Loop 节点已经从 DSL 中移除。迭代语义由 acceptance criteria 和 retry budget 表达。
 
-## 位置工程
+节点可以定义验收标准：
 
-`markdown/position_engineering_deep_refactor.md` 的主要方向是把“位置”提升为 runtime 的一等概念。
-
-位置工程的含义是：节点不应该只是拿到一包通用上下文，而应该先理解：
-
-- 自己在任务树里的位置。
-- 自己在当前位置承担的角色。
-- 自己负责的范围。
-- 自己被允许执行哪些 action。
-- 自己应该检索哪些证据。
-- 完成后必须交付什么 handoff。
-
-也就是：
-
-```text
-Position -> Context Needs -> Retrieval Plan -> Context Pack -> Decision -> Handoff
+```json
+{
+  "description": "go test ./pkg/llm passes",
+  "required": true,
+  "check_type": "testable",
+  "check_command": "go test ./pkg/llm"
+}
 ```
 
-规划中的 runtime 概念包括：
+完成时必须提交 `acceptance_results`。对于 `testable`，runtime 会自己执行命令；如果真实退出码和模型自评不一致，runtime 以真实结果为准。
 
-- `Position`：节点 ID、父节点、深度、路径、兄弟序号、角色、scope、权限、约束。
-- `ContextNeed`：当前位置需要知道什么。
-- `ContextPlan`：查询哪些 provider、预算是多少。
-- `ContextProvider`：memory、artifact、tree state、runtime state、VFS、未来的 vector store。
-- `ContextPack`：排序、去重、压缩、预算裁剪后的最终上下文。
-- `AuthorityDescriptor`：当前位置的 action 权限，由 runtime 强制执行。
+完成流程是：
 
-当前代码已经具备节点激活、结构化 Memory、Artifact 和 Handoff 等基础。下一步是把位置策略显式化，而不是分散在 prompt 和辅助函数里。
+```text
+模型提出完成
+  -> runtime 验证必需验收标准
+  -> 写入 handoff
+  -> pin / index artifacts
+  -> cursor 继续推进
+```
 
-## RAG 与 Artifact 路线图
+### Human-in-the-loop
 
-`markdown/rag_artifact_position_engineering_experiment.md` 描述了一个风险更高的架构实验：从“任务树 + Prompt 拼装”推进到“任务树 + Artifact 交接 + 可检索记忆 + 可验收节点”。
+`request_human_input` 是 runtime 中断：
 
-规划方向包括：
+```text
+request_human_input
+  -> node.Status = WaitingHuman
+  -> 保存状态
+  -> 用户用 --resume <node-id> 恢复
+  -> 注入 HumanResponse
+  -> 继续执行
+```
 
-- 通过 `add_artifact` action 让 Artifact 成为 DSL 一等对象。
-- 在 SQLite 中保存更细粒度的 Artifact 元数据，后续接入向量索引。
-- 增加混合检索：metadata filter、SQLite FTS、vector search、merge、rerank、context pack builder。
-- 用全局上下文上限和相关性打包替代固定比例预算。
-- 增加大 Artifact Resolver，只抽取当前节点需要的证据。
-- 给节点引入 acceptance criteria 和 acceptance results。
-- 未来用 retry budget + 显式验收替代结构化 Loop 节点。
-- 增强 JSON 输出处理：提取 JSON、schema 校验、结构化 parse error，以及可用时的 provider JSON/schema 模式。
+这让人类介入成为可持久化、可恢复的执行状态，而不是一次性的终端输入。
 
-这部分是路线图，不等同于当前全部已实现功能。
+## Runtime 包结构
 
-## Terminal UI 路线图
+`pkg/runtime` 围绕一个 `Runtime` 对象拆分：
 
-`markdown/terminal_ui_plan.md` 计划增加一个 TUI，让长任务执行变得可观察、可介入、可恢复。
+| 文件 | 职责 |
+|---|---|
+| `runtime.go` | `Runtime` struct、`NewRuntime`、生命周期辅助 |
+| `execute.go` | DFS 主循环、retry、stagnation、cursor 移动 |
+| `dispatch.go` | Action DSL dispatch 和核心 handler |
+| `position.go` | Position、role、scope、authority policy |
+| `activation.go` | NodeActivation 和 ContextPack pipeline |
+| `context_assembly.go` | 全局上下文、Tree index、workspace 兼容逻辑 |
+| `prompt.go` | 从 runtime 状态构造 Prompt |
+| `prompt_template.go` | 内嵌节点 Prompt 模板 |
+| `index.go` | SQLite rebuild/sync 和 vector indexing |
+| `shell.go` | Shell 执行和文件工具沙箱 |
+| `actions.go` | 特殊 action：human、memory、artifact、context、acceptance |
+| `agentic_loop.go` | Leaf refinement loop |
+| `budget.go` | 上下文和检索预算配置 |
+| `tokens.go` | token 估算、压缩、兜底 operation log |
 
-计划中的 TUI 是一个开发者驾驶舱，用于：
-
-- 启动任务。
-- 查看当前 Cursor 位置。
-- 检查 AST。
-- 阅读 Artifact 摘要和内容切片。
-- 查看 Memory 查询结果。
-- 回答 human-in-the-loop 请求。
-- 跟踪 retry、上下文压缩、错误和 save/load 状态。
-
-推荐技术栈是 Go 原生的 Bubble Tea、Bubbles、Lip Gloss 和 Glamour。TUI 是现有 CLI 的补充，不是替代。
+这样 `runtime.go` 保持为 composition root，执行行为分散到职责明确的文件中。
 
 ## 架构
 
 ```mermaid
 graph TD
-    User["用户任务"] --> CLI["CLI / 未来 TUI"]
-    CLI --> Runtime["Runtime"]
+    User["用户任务"] --> CLI["CLI"]
+    CLI --> Runtime["Runtime Kernel"]
 
     Runtime <--> Cursor["DFS Cursor"]
     Cursor <--> Tree["Task Tree / AST"]
+
+    Runtime --> Position["BuildPosition"]
+    Position --> ContextPack["ContextPack"]
+    ContextPack <--> Memory["SQLite Memory"]
+    ContextPack <--> Vector["Vector Store"]
+    ContextPack <--> Resolver["Artifact Resolver"]
+
     Runtime <--> Artifacts["Artifact Store"]
-    Runtime <--> Memory["SQLite Memory Index"]
-    Runtime --> Prompt["确定性 Prompt 快照"]
+    Runtime --> Prompt["Embedded Prompt Templates"]
+    Prompt --> LLM["LLM Engine"]
+    LLM --> Parser["JSON Parser"]
+    Parser --> Dispatch["Action Dispatch"]
+    Dispatch --> Runtime
 
-    Prompt --> LLM["LLM Provider"]
-    LLM --> Parser["JSON Parser / Validator"]
-    Parser --> Runtime
-
-    Runtime --> State["Saved JSON State"]
-    Runtime --> Human["Human Input Hook"]
+    Runtime --> Save["SaveState JSON"]
+    Runtime --> Human["Human Interrupt"]
 ```
 
-核心目录：
+## 项目结构
 
-- `cmd/`：CLI 入口、参数、save/load、runtime 启动。
-- `pkg/runtime/`：执行循环、Prompt 构建、action 执行、沙箱、上下文处理、Memory 同步。
-- `pkg/llm/`：Provider API 类型、系统提示、Parser、校验、Engine wrapper。
-- `pkg/tasknode/`：任务树模型、节点状态、变量、handoff、人类请求 / 响应、恢复辅助。
-- `pkg/cursor/`：DFS 遍历和 loop 相关 cursor 状态。
-- `pkg/artifact/`：Artifact Store、摘要、分片、淘汰、pin、磁盘 spill。
-- `pkg/memory/`：SQLite 索引和受限检索查询。
+- `cmd/`：CLI 编排、engine 选择、状态加载/保存、信号处理、人类恢复、最终树打印。
+- `pkg/runtime/`：VM kernel、执行循环、上下文组装、action dispatch、权限校验、索引、沙箱。
+- `pkg/llm/`：LLM provider wrapper、内嵌 system prompt、action DTO、JSON parser。
+- `pkg/tasknode/`：任务树模型、结构化 handoff、验收状态、人类请求/响应状态。
+- `pkg/cursor/`：DFS cursor 和遍历状态。
+- `pkg/artifact/`：Artifact store、切片、spill、pin、结构化元数据。
+- `pkg/memory/`：SQLite schema、索引、受限查询、FTS、retrieval trace。
+- `pkg/retrieval/`：FTS/vector 混合检索和确定性 rerank。
+- `pkg/vector/`：可选 chromem-go vector index。
+- `pkg/resolver/`：大 Artifact 证据抽取。
 - `pkg/vfs/`：遗留虚拟文件系统代码。
-- `visualizer/`：Go 可视化服务器。
-- `visualizer/frontend/`：用于检查保存状态的 Vite + React 前端。
-- `markdown/`：设计笔记和实验性架构文档。该目录当前被 git 忽略。
-
-## 安装
-
-```bash
-git clone https://github.com/Steve65535/llmvm.git
-cd llmvm
-go mod download
-```
+- `visualizer/`：保存状态可视化服务器和前端。
+- `markdown/`：设计笔记和架构实验文档。
 
 ## 配置
 
 | 变量 | 默认值 | 说明 |
 |---|---:|---|
-| `DEEPSEEK_API_KEY` | 未设置 | DeepSeek API key，用于真实模型调用。未设置时使用可用的 stub / 测试流程。 |
-| `CONTEXT_BUDGET` | `64000` | 当前 runtime Prompt 组装使用的总上下文预算。 |
-
-后续 TUI 和检索实验可能引入更多 `LLMVM_*` 变量。建议名称见 `markdown/` 里的设计文档。
+| `DEEPSEEK_API_KEY` | 未设置 | DeepSeek API key。未设置时 CLI 回退到 `StubEngine`。 |
+| `LLMVM_CONTEXT_TOKEN_LIMIT` | `200000` | 当前 runtime 使用的总 prompt 预算。 |
+| `CONTEXT_BUDGET` | fallback alias | 兼容旧版本的上下文预算变量。 |
+| `LLMVM_RETRIEVAL_TOKEN_LIMIT` | context limit 的一半 | retrieval 候选预算。 |
+| `LLMVM_ARTIFACT_INLINE_TOKEN_LIMIT` | `6000` | 大 Artifact 内联 / resolver 证据预算。 |
+| `LLMVM_ARTIFACT_ASYNC_TOKEN_THRESHOLD` | `12000` | 预留给异步 Artifact resolver 的阈值。 |
+| `LLMVM_COMMAND_RESULT_CHARS` | `8000` | command / artifact slice 暴露给 prompt 的最大字符数。 |
+| `LLMVM_VECTOR_DIR` | 从 save 路径派生 | 可选 chromem-go vector store 目录。 |
 
 ## 使用
+
+安装依赖：
+
+```bash
+go mod download
+```
 
 运行任务：
 
@@ -254,14 +360,20 @@ go run cmd/main.go --save state.json "执行一个复杂任务"
 go run cmd/main.go --load state.json
 ```
 
-使用保存状态启动可视化服务器：
+恢复等待人类输入的节点：
+
+```bash
+go run cmd/main.go --load state.json --resume node_id
+```
+
+启动可视化服务器：
 
 ```bash
 cd visualizer
 go run server.go -file ../deep_compiler.json
 ```
 
-启动可视化前端：
+启动前端：
 
 ```bash
 cd visualizer/frontend
@@ -276,7 +388,7 @@ npm run dev
 go test ./...
 ```
 
-运行重点测试：
+重点测试：
 
 ```bash
 go test ./pkg/llm -v
@@ -285,7 +397,7 @@ go test ./pkg/artifact -v
 go test ./pkg/memory -v
 ```
 
-运行前端检查：
+前端检查：
 
 ```bash
 cd visualizer/frontend
@@ -293,17 +405,30 @@ npm run lint
 npm run build
 ```
 
-Go 文件使用 `gofmt`。保持 runtime 行为确定：稳定排序会影响 prompt cache、可复现测试、保存状态和可视化输出。
+## 设计状态
 
-## 设计原则
+已经实现或部分实现：
 
-- 任务树是执行状态的权威来源。
-- SQLite Memory 是可重建检索索引。
-- Artifact 保存证据；变量和 handoff 保存引用。
-- Parser 和 action 执行边界必须做 runtime 校验。
-- 上下文应该由位置、相关性和预算决定，而不是由聊天历史惯性决定。
-- 长任务必须可观察、可恢复、可检查。
-- 未来 RAG / Vector 功能应通过接口接入，而不是硬编码进 runtime 控制流。
+- 任务树执行。
+- Position 和 authority check。
+- 内嵌 prompt 模板。
+- 带结构化元数据的 Artifact Store。
+- SQLite Memory 和 FTS。
+- 可选 Vector retrieval。
+- ContextPack pipeline。
+- 大 Artifact Resolver。
+- Acceptance criteria 和 runtime testable check。
+- Human-in-the-loop pause/resume。
+- Save/load state。
+
+仍在演进：
+
+- 更精确的 parser diagnostics。
+- ContextPack 内部更统一的预算所有权。
+- 更清晰的 ContextProvider 抽象。
+- manual / LLM-judge acceptance 的完整语义。
+- TUI cockpit。
+- Provider-level JSON/schema 输出约束。
 
 ## 许可证
 
