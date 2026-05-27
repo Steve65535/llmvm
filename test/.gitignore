@@ -1,0 +1,10 @@
+# Runtime logs
+llm_logs.txt
+*.log
+
+# Runtime sandbox contents. Keep only directory placeholders in git.
+sandbox/*
+!sandbox/.gitkeep
+!sandbox/.artifacts/
+sandbox/.artifacts/*
+!sandbox/.artifacts/.gitkeep
