@@ -72,7 +72,6 @@ TUI 计划新增：
 
 - `LLMVM_SAVE_PATH`：默认保存状态文件路径，例如 `state.json`。
 - `LLMVM_LOAD_PATH`：默认加载状态文件路径，空值表示新任务。
-- `LLMVM_SQLITE_PATH`：显式指定 SQLite memory 文件路径，空值时从 save/load path 派生。
 - `LLMVM_TUI_AUTOSAVE`：是否启用 TUI 自动保存，默认 `true`。
 - `LLMVM_TUI_AUTOSAVE_INTERVAL_SECONDS`：TUI 自动保存间隔，默认 `30`。
 - `LLMVM_TUI_EVENT_BUFFER_SIZE`：TUI event log 内存保留条数，默认 `1000`。
@@ -426,7 +425,7 @@ type SaveState struct {
 - 启动时选择新任务或加载 state
 - 运行中定时 / 每步 autosave
 - Ctrl+C emergency save
-- 保存路径派生 SQLite path
+- SQLite memory path 从当前 session 的 save/load state 路径派生，不使用全局环境变量
 - load 后 rebuild SQLite index
 - 检测 WaitingHuman 节点并进入恢复流程
 
