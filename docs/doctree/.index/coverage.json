@@ -1,0 +1,147 @@
+{
+  "mode": "architecture",
+  "generated_at": "2026-05-27T14:53:57Z",
+  "root": "/Users/steve/Desktop/llmvm-rag-exp",
+  "pages": [
+    "docs/doctree/README.md",
+    "docs/doctree/模块/运行时引擎.md",
+    "docs/doctree/模块/运行时/执行循环与Prompt.md",
+    "docs/doctree/模块/运行时/节点激活上下文.md",
+    "docs/doctree/模块/运行时/Action执行与沙箱.md",
+    "docs/doctree/模块/LLM接口与Action协议.md",
+    "docs/doctree/模块/LLM接口/模型调用与Prompt协议.md",
+    "docs/doctree/模块/LLM接口/JSON解析与Action校验.md",
+    "docs/doctree/模块/任务树与游标.md",
+    "docs/doctree/模块/Artifact与结构化记忆.md",
+    "docs/doctree/模块/状态与记忆/ArtifactStore.md",
+    "docs/doctree/模块/状态与记忆/SQLiteMemory.md",
+    "docs/doctree/运行与集成/CLI与可视化.md",
+    "docs/doctree/运行与集成/测试与配置.md"
+  ],
+  "paths": {
+    "documented": [
+      "README.md",
+      "README_CN.md",
+      "AGENTS.md",
+      "cmd/main.go",
+      "pkg/runtime/runtime.go",
+      "pkg/runtime/activation.go",
+      "pkg/runtime/actions.go",
+      "pkg/runtime/agentic_loop.go",
+      "pkg/llm/api.go",
+      "pkg/llm/parser.go",
+      "pkg/llm/engine.go",
+      "pkg/llm/async.go",
+      "pkg/llm/sub.go",
+      "pkg/tasknode/tasknode.go",
+      "pkg/cursor/cursor.go",
+      "pkg/artifact/store.go",
+      "pkg/memory/memory.go",
+      "visualizer/server.go",
+      "visualizer/frontend/src/App.jsx",
+      "visualizer/frontend/package.json",
+      "go.mod",
+      "visualizer/go.mod"
+    ],
+    "skipped": [
+      {
+        "path": ".git",
+        "reason": "VCS metadata; scanner included it, but it is not documentation scope."
+      },
+      {
+        "path": "go.sum",
+        "reason": "Dependency checksum file."
+      },
+      {
+        "path": "visualizer/frontend/package-lock.json",
+        "reason": "Generated dependency lockfile."
+      },
+      {
+        "path": "visualizer/llmvm_vis_server",
+        "reason": "Compiled binary artifact."
+      },
+      {
+        "path": "deep_compiler.json",
+        "reason": "Large sample saved state; documented as visualizer fixture only."
+      },
+      {
+        "path": "cmd/config.json",
+        "reason": "Small config fixture; not central to architecture."
+      },
+      {
+        "path": "pkg/llm/request.json",
+        "reason": "Sample schema fixture; parser behavior documented through pkg/llm."
+      },
+      {
+        "path": "pkg/llm/response.json",
+        "reason": "Sample schema fixture; parser behavior documented through pkg/llm."
+      }
+    ],
+    "pending": [
+      "pkg/vfs/node.go",
+      "pkg/vfs/vfs.go",
+      "pkg/vfs/registry.go",
+      "visualizer/frontend/src/main.jsx",
+      "visualizer/frontend/src/App.css",
+      "visualizer/frontend/src/index.css",
+      "visualizer/frontend/vite.config.js",
+      "visualizer/frontend/eslint.config.js",
+      "UPDATE_PLAN.md",
+      "CLAUDE.md",
+      "markdown/position_engineering_deep_refactor.md",
+      "markdown/rag_artifact_position_engineering_experiment.md",
+      "markdown/terminal_ui_plan.md"
+    ],
+    "counts": {
+      "documented": 22,
+      "skipped": 8,
+      "pending": 13
+    }
+  },
+  "symbols": {
+    "documented_representative": [
+      "cmd.main",
+      "cmd.SaveState",
+      "cmd.findWaitingHumanNodes",
+      "runtime.Runtime",
+      "runtime.NewRuntime",
+      "runtime.Execute",
+      "runtime.buildPromptWithGlobalContext",
+      "runtime.NodeActivation",
+      "runtime.buildNodeActivation",
+      "runtime.ExecuteAction",
+      "runtime.handleRequestHumanInput",
+      "runtime.ResumeWithHumanResponse",
+      "runtime.sandboxPath",
+      "llm.Engine",
+      "llm.APIEngine.Call",
+      "llm.ParseResponse",
+      "llm.NodeDTO.ToTaskNode",
+      "tasknode.TaskNode",
+      "tasknode.NewTaskNode",
+      "tasknode.AppendSiblingAfter",
+      "cursor.Cursor",
+      "artifact.Artifact",
+      "artifact.Store.Add",
+      "artifact.Store.ReadSlice",
+      "artifact.Store.Index",
+      "memory.Store",
+      "memory.New",
+      "memory.UpsertNode",
+      "memory.UpsertHandoff",
+      "memory.UpsertArtifact",
+      "memory.SearchArtifactsFTS",
+      "memory.Rebuild",
+      "visualizer.main",
+      "frontend.App"
+    ],
+    "pending": "Architecture mode did not document every private helper or every test function. See docs/doctree/.index/symbols.json for the generated symbol inventory."
+  },
+  "notes": [
+    "This is architecture mode, not full mode. It documents the main runtime flow and representative public/internal APIs.",
+    "docs/doctree/.index/paths.json and symbols.json were generated with the repo-doctree skill scanners.",
+    "The generated paths scanner marked .git as included; coverage intentionally skips it.",
+    "The markdown/ directory is gitignored in this repository, but its design documents are listed as pending context rather than rewritten into the doctree."
+  ]
+}
+
