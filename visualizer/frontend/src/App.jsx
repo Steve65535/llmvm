@@ -37,6 +37,7 @@ function App() {
   const getStatusColor = (node) => {
     if (node.Status === 3) return '#ff4d4f'
     if (node.Status === 2) return '#52c41a'
+    if (node.Status === 4) return '#9254de'  // WaitingHuman
     if (node.Status === 1) return '#1890ff'
     if (node.WetherTraveled) return '#faad14'
     return '#d9d9d9'
@@ -63,7 +64,7 @@ function App() {
             <div className="node-header" style={{ backgroundColor: getStatusColor(node) }} />
             <div className="node-body">
               <strong>{node.Name}</strong>
-              <div className="node-type">Type: {['Normal', 'Loop', 'Leaf'][node.Type]}</div>
+              <div className="node-type">Type: {['Normal', 'Leaf'][node.Type] || 'Unknown'}</div>
               {node.Result && (
                 <div className="node-result">
                   {node.Result.length > 50 ? node.Result.substring(0, 50) + '...' : node.Result}
@@ -74,6 +75,13 @@ function App() {
               )}
               {node.artifact_refs && node.artifact_refs.length > 0 && (
                 <div className="node-artifact-badge">{node.artifact_refs.length} artifacts</div>
+              )}
+              {node.acceptance_criteria && node.acceptance_criteria.length > 0 && (
+                <div className="node-acceptance-badge">
+                  {node.acceptance_results
+                    ? `${node.acceptance_results.filter(r => r.passed).length}/${node.acceptance_criteria.length} ac`
+                    : `${node.acceptance_criteria.length} ac`}
+                </div>
               )}
             </div>
           </div>
@@ -93,9 +101,28 @@ function App() {
     return (
       <div className="tooltip">
         <h3>{hoverNode.Name} ({hoverNode.ID})</h3>
-        <p><strong>Status:</strong> {['Pending', 'Running', 'Completed', 'Failed'][hoverNode.Status]}</p>
+        <p><strong>Status:</strong> {['Pending', 'Running', 'Completed', 'Failed', 'WaitingHuman'][hoverNode.Status]}</p>
         <p><strong>Traveled:</strong> {hoverNode.WetherTraveled ? 'Yes' : 'No'}</p>
         <p><strong>Finished:</strong> {hoverNode.WetherFinished ? 'Yes' : 'No'}</p>
+
+        {hoverNode.acceptance_criteria && hoverNode.acceptance_criteria.length > 0 && (
+          <div className="tooltip-section">
+            <strong>Acceptance Criteria:</strong>
+            <ul>
+              {hoverNode.acceptance_criteria.map((ac, i) => {
+                const result = (hoverNode.acceptance_results || []).find(r => r.criterion_id === ac.id);
+                const status = result ? (result.passed ? '✓' : '✗') : '·';
+                return (
+                  <li key={i}>
+                    <span style={{ color: result?.passed ? '#52c41a' : result ? '#ff4d4f' : '#888' }}>{status} </span>
+                    [{ac.check_type}{ac.required ? ' required' : ''}] {ac.description}
+                    {result && result.notes && <em> — {result.notes}</em>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {hoverNode.Information && hoverNode.Information.length > 0 && (
           <div className="tooltip-section">
@@ -149,12 +176,17 @@ function App() {
         <h2>Artifacts ({artifacts.counter})</h2>
         <div className="artifact-list">
           {artifacts.artifacts.map(art => (
-            <div key={art.id} className={`artifact-item ${art.evicted ? 'evicted' : ''} ${art.pinned ? 'pinned' : ''}`}>
-              <span className="artifact-id">{art.id}</span>
+            <div key={art.id} className={`artifact-item ${art.evicted ? 'evicted' : ''} ${art.pinned ? 'pinned' : ''} ${art.superseded_by ? 'superseded' : ''}`}>
+              <span className="artifact-id">{art.id}{art.version > 1 && `·v${art.version}`}</span>
               <span className="artifact-type">{art.type}</span>
+              {art.name && <span className="artifact-name">{art.name}</span>}
+              {art.scope && <span className="artifact-scope">{art.scope}</span>}
+              {art.granularity && <span className="artifact-granularity">{art.granularity}</span>}
+              {art.importance === 'high' && <span className="artifact-badge">HIGH</span>}
               <span className="artifact-summary">{art.summary}</span>
               {art.pinned && <span className="artifact-badge">PIN</span>}
               {art.evicted && <span className="artifact-badge evicted-badge">EVICTED</span>}
+              {art.superseded_by && <span className="artifact-badge">→ {art.superseded_by}</span>}
             </div>
           ))}
         </div>

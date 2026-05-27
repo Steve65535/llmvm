@@ -13,7 +13,7 @@ func TestParseResponse(t *testing.T) {
 				"node": {
 					"id": "child_1",
 					"name": "Test Node",
-					"type": "Loop",
+					"type": "Leaf",
 					"information": "Test info"
 				}
 			}
@@ -35,12 +35,19 @@ func TestParseResponse(t *testing.T) {
 	}
 
 	taskNode := action.Node.ToTaskNode()
-	// Note: checking int value directly or trusting the mapping logic
-	if taskNode.Type != 1 { // Loop is 1
-		t.Errorf("Expected TaskType Loop (1), got %d", taskNode.Type)
+	// Loop has been removed; Leaf is now iota = 1.
+	if taskNode.Type != 1 {
+		t.Errorf("Expected TaskType Leaf (1), got %d", taskNode.Type)
 	}
 	if len(taskNode.Information) != 1 || taskNode.Information[0] != "Test info" {
 		t.Errorf("Information mismatch")
+	}
+}
+
+func TestParseResponseRejectsLoop(t *testing.T) {
+	input := `{"actions":[{"action_type":"create_node","node":{"id":"x","name":"X","type":"Loop","information":"deprecated"}}]}`
+	if _, err := ParseResponse(input); err == nil {
+		t.Fatal("expected ParseResponse to reject Loop type")
 	}
 }
 

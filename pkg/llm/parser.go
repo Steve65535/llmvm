@@ -8,11 +8,29 @@ import (
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 )
 
+// AcceptanceCriterionDTO 是 create_node payload 中的验收标准。
+type AcceptanceCriterionDTO struct {
+	ID           string `json:"id,omitempty"`
+	Description  string `json:"description"`
+	Required     bool   `json:"required"`
+	CheckType    string `json:"check_type"`              // testable / manual / llm_judge
+	CheckCommand string `json:"check_command,omitempty"` // testable 用
+	ExpectedExit int    `json:"expected_exit,omitempty"` // testable 用
+}
+
+// AcceptanceResultDTO 是 mark_complete payload 中的验收结果。
+type AcceptanceResultDTO struct {
+	CriterionID          string   `json:"criterion_id"`
+	Passed               bool     `json:"passed"`
+	Notes                string   `json:"notes,omitempty"`
+	EvidenceArtifactRefs []string `json:"evidence_artifact_refs,omitempty"`
+}
+
 // NodeDTO 对应 response.json 中的 node 结构
 type NodeDTO struct {
 	ID          string                 `json:"id"`
 	Name        string                 `json:"name"`
-	Type        string                 `json:"type"` // "Normal", "Loop", "Leaf"
+	Type        string                 `json:"type"` // "Normal", "Leaf"
 	Information string                 `json:"information"`
 	Variables   map[string]interface{} `json:"variables,omitempty"`
 	Index       int                    `json:"index,omitempty"`
@@ -21,6 +39,9 @@ type NodeDTO struct {
 	// 🆕 新增：错误处理
 	ErrorHandlerID string `json:"error_handler_id,omitempty"`
 	MaxRetries     int    `json:"max_retries,omitempty"`
+
+	// === 验收标准（替代 Loop）===
+	AcceptanceCriteria []AcceptanceCriterionDTO `json:"acceptance_criteria,omitempty"`
 }
 
 // NodeState 对应 request.json 中的 parent_info/current_info
@@ -91,6 +112,38 @@ type Action struct {
 	QueryType string                 `json:"query_type,omitempty"`
 	Filters   map[string]interface{} `json:"filters,omitempty"`
 	Limit     int                    `json:"limit,omitempty"`
+
+	// === add_artifact / modify_artifact (一等 DSL) ===
+	ArtifactName        string                  `json:"artifact_name,omitempty"`
+	ArtifactType        string                  `json:"artifact_type,omitempty"` // 复用 type 名："evidence", "design_contract", ...
+	ArtifactScope       string                  `json:"scope,omitempty"`         // node / subtree / global
+	ArtifactTags        []string                `json:"tags,omitempty"`
+	ArtifactGranularity string                  `json:"granularity,omitempty"`
+	ArtifactImportance  string                  `json:"importance,omitempty"`
+	ArtifactSource      *ArtifactSourceDTO      `json:"source,omitempty"`
+	SupersedesArtifact  string                  `json:"supersedes,omitempty"` // modify_artifact 时指向旧 artifact
+
+	// === acceptance_results (mark_complete 时附带) ===
+	AcceptanceResults []AcceptanceResultDTO `json:"acceptance_results,omitempty"`
+
+	// === request_context (节点显式请求补充上下文) ===
+	Needs []ContextNeedDTO `json:"needs,omitempty"`
+}
+
+// ArtifactSourceDTO add_artifact payload 中的 source 子结构
+type ArtifactSourceDTO struct {
+	Kind    string `json:"kind,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Locator string `json:"locator,omitempty"`
+}
+
+// ContextNeedDTO request_context payload 中的单条需求
+type ContextNeedDTO struct {
+	Kind      string `json:"kind"` // artifact / siblings / ancestors / vector / fts
+	Query     string `json:"query"`
+	Scope     string `json:"scope,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+	Rationale string `json:"rationale,omitempty"`
 }
 
 // Response 对应 response.json 的根结构
@@ -121,10 +174,12 @@ func ParseResponse(jsonStr string) (*Response, error) {
 		// 对于 create_node action，验证 Node Type 是否合法
 		if action.ActionType == "create_node" {
 			switch action.Node.Type {
-			case "Normal", "Loop", "Leaf":
+			case "Normal", "Leaf":
 				// valid
 			case "":
 				return nil, fmt.Errorf("action %d (create_node) missing node type", i)
+			case "Loop":
+				return nil, fmt.Errorf("action %d (create_node) Loop type has been removed; use acceptance_criteria instead", i)
 			default:
 				return nil, fmt.Errorf("action %d contains invalid node type: %s", i, action.Node.Type)
 			}
@@ -167,9 +222,11 @@ func ParseResponse(jsonStr string) (*Response, error) {
 				return nil, fmt.Errorf("action %d (append_sibling_node) missing node.id", i)
 			}
 			switch action.Node.Type {
-			case "Normal", "Loop", "Leaf":
+			case "Normal", "Leaf":
 			case "":
 				return nil, fmt.Errorf("action %d (append_sibling_node) missing node type", i)
+			case "Loop":
+				return nil, fmt.Errorf("action %d (append_sibling_node) Loop type has been removed", i)
 			default:
 				return nil, fmt.Errorf("action %d (append_sibling_node) invalid node type: %s", i, action.Node.Type)
 			}
@@ -184,6 +241,62 @@ func ParseResponse(jsonStr string) (*Response, error) {
 			}
 			if !validQueryTypes[action.QueryType] {
 				return nil, fmt.Errorf("action %d (query_memory) invalid query_type: %q", i, action.QueryType)
+			}
+		}
+		if action.ActionType == "add_artifact" {
+			if action.ArtifactName == "" {
+				return nil, fmt.Errorf("action %d (add_artifact) missing artifact_name", i)
+			}
+			if action.Content == "" {
+				return nil, fmt.Errorf("action %d (add_artifact) missing content", i)
+			}
+			if s := action.ArtifactScope; s != "" && s != "node" && s != "subtree" && s != "global" {
+				return nil, fmt.Errorf("action %d (add_artifact) invalid scope %q (want node/subtree/global)", i, s)
+			}
+		}
+		if action.ActionType == "modify_artifact" {
+			if action.SupersedesArtifact == "" {
+				return nil, fmt.Errorf("action %d (modify_artifact) missing supersedes (artifact id to replace)", i)
+			}
+			if action.Content == "" {
+				return nil, fmt.Errorf("action %d (modify_artifact) missing content", i)
+			}
+		}
+		if action.ActionType == "request_context" {
+			if len(action.Needs) == 0 {
+				return nil, fmt.Errorf("action %d (request_context) missing needs", i)
+			}
+			for j, n := range action.Needs {
+				if n.Kind == "" {
+					return nil, fmt.Errorf("action %d.needs[%d] missing kind", i, j)
+				}
+				if n.Query == "" {
+					return nil, fmt.Errorf("action %d.needs[%d] missing query", i, j)
+				}
+			}
+		}
+		if action.ActionType == "create_node" {
+			for j, ac := range action.Node.AcceptanceCriteria {
+				if ac.Description == "" {
+					return nil, fmt.Errorf("action %d.acceptance_criteria[%d] missing description", i, j)
+				}
+				switch ac.CheckType {
+				case "testable", "manual", "llm_judge":
+				case "":
+					return nil, fmt.Errorf("action %d.acceptance_criteria[%d] missing check_type (testable/manual/llm_judge)", i, j)
+				default:
+					return nil, fmt.Errorf("action %d.acceptance_criteria[%d] invalid check_type %q", i, j, ac.CheckType)
+				}
+				if ac.CheckType == "testable" && ac.CheckCommand == "" {
+					return nil, fmt.Errorf("action %d.acceptance_criteria[%d] testable check_type requires check_command", i, j)
+				}
+			}
+		}
+		if action.ActionType == "mark_complete" {
+			for j, r := range action.AcceptanceResults {
+				if r.CriterionID == "" {
+					return nil, fmt.Errorf("action %d.acceptance_results[%d] missing criterion_id", i, j)
+				}
 			}
 		}
 		// mark_complete action 不需要 node 字段，所以不验证
@@ -210,8 +323,6 @@ func CleanJSONString(str string) string {
 func (n *NodeDTO) ToTaskNode() *tasknode.TaskNode {
 	var typ tasknode.TaskType
 	switch n.Type {
-	case "Loop":
-		typ = tasknode.Loop
 	case "Leaf":
 		typ = tasknode.Leaf
 	default:
@@ -233,5 +344,22 @@ func (n *NodeDTO) ToTaskNode() *tasknode.TaskNode {
 		node.Index = n.Index
 	}
 	node.IsImportant = n.IsImportant
+
+	// 转换验收标准
+	for k, ac := range n.AcceptanceCriteria {
+		id := ac.ID
+		if id == "" {
+			id = fmt.Sprintf("%s_ac_%d", n.ID, k+1)
+		}
+		node.AcceptanceCriteria = append(node.AcceptanceCriteria, tasknode.AcceptanceCriterion{
+			ID:           id,
+			Description:  ac.Description,
+			Required:     ac.Required,
+			CheckType:    tasknode.CheckType(ac.CheckType),
+			CheckCommand: ac.CheckCommand,
+			ExpectedExit: ac.ExpectedExit,
+			SourceNodeID: n.ID,
+		})
+	}
 	return node
 }

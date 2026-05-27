@@ -203,10 +203,7 @@ func printTree(node *tasknode.TaskNode, indent int) {
 	}
 
 	nodeType := "Normal"
-	switch node.Type {
-	case tasknode.Loop:
-		nodeType = "Loop"
-	case tasknode.Leaf:
+	if node.Type == tasknode.Leaf {
 		nodeType = "Leaf"
 	}
 

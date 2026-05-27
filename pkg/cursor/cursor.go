@@ -4,18 +4,17 @@ import (
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 )
 
-// Cursor 是语法树的读写头，用于深度优先遍历
+// Cursor 是语法树的读写头，用于深度优先遍历。
+// Loop 节点已删除，循环语义由"验收标准 + retry budget"协议替代，因此 cursor 不再维护 LoopStack。
 type Cursor struct {
-	Root      *tasknode.TaskNode
-	Current   *tasknode.TaskNode
-	LoopStack []*tasknode.TaskNode // Loop 节点的栈，用于管理循环状态
+	Root    *tasknode.TaskNode
+	Current *tasknode.TaskNode
 }
 
 func New(root *tasknode.TaskNode) *Cursor {
 	return &Cursor{
-		Root:      root,
-		Current:   root,
-		LoopStack: []*tasknode.TaskNode{},
+		Root:    root,
+		Current: root,
 	}
 }
 
@@ -29,15 +28,8 @@ func (c *Cursor) MoveDown() bool {
 	if c.Current == nil {
 		return false
 	}
-
 	nextChild := c.Current.GetNextUntraveledChild()
 	if nextChild != nil {
-		// 如果当前节点是 Loop 节点，且不在栈顶（幂等入栈），将其推入栈
-		if c.Current.Type == tasknode.Loop {
-			if len(c.LoopStack) == 0 || c.LoopStack[len(c.LoopStack)-1] != c.Current {
-				c.LoopStack = append(c.LoopStack, c.Current)
-			}
-		}
 		c.Current = nextChild
 		return true
 	}
@@ -49,15 +41,8 @@ func (c *Cursor) MoveFirstUnfinishedChild() bool {
 	if c.Current == nil {
 		return false
 	}
-
 	for _, child := range c.Current.Children {
 		if !child.WetherFinished {
-			// 如果当前节点是 Loop 节点，且不在栈顶，将其推入栈
-			if c.Current.Type == tasknode.Loop {
-				if len(c.LoopStack) == 0 || c.LoopStack[len(c.LoopStack)-1] != c.Current {
-					c.LoopStack = append(c.LoopStack, c.Current)
-				}
-			}
 			c.Current = child
 			return true
 		}
@@ -71,34 +56,8 @@ func (c *Cursor) MoveUp() bool {
 		c.Current = nil
 		return false
 	}
-
-	// 如果当前节点是 Loop 节点，且我们正从它向上移动（意味着它已结束）
-	if c.Current.Type == tasknode.Loop {
-		c.PopLoop(c.Current)
-	}
-
 	c.Current = c.Current.Parent
 	return true
-}
-
-// PopLoop 从栈中弹出指定的 Loop 节点
-func (c *Cursor) PopLoop(node *tasknode.TaskNode) {
-	if len(c.LoopStack) > 0 && c.LoopStack[len(c.LoopStack)-1] == node {
-		c.LoopStack = c.LoopStack[:len(c.LoopStack)-1]
-	}
-}
-
-// GetCurrentLoop 获取当前所在的 Loop 节点（栈顶）
-func (c *Cursor) GetCurrentLoop() *tasknode.TaskNode {
-	if len(c.LoopStack) == 0 {
-		return nil
-	}
-	return c.LoopStack[len(c.LoopStack)-1]
-}
-
-// IsInLoop 检查当前是否在 Loop 节点内
-func (c *Cursor) IsInLoop() bool {
-	return len(c.LoopStack) > 0
 }
 
 // GetPath 获取从根节点到当前节点的路径
@@ -106,7 +65,6 @@ func (c *Cursor) GetPath() []string {
 	if c.Current == nil {
 		return []string{}
 	}
-
 	path := []string{}
 	node := c.Current
 	for node != nil {

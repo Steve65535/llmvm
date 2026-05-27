@@ -19,11 +19,46 @@ const (
 
 type TaskType int
 
+// TaskType 取消 Loop。验收标准 + retry budget + escalation handoff 替代 Loop 语义。
 const (
 	Normal TaskType = iota
-	Loop
 	Leaf
 )
+
+// CheckType 是验收标准的检查方式。
+//
+//   - testable：runtime 执行 shell 命令，按 exit code 判定（默认期望 0）
+//   - manual：仅记录，不自动执行（人类或上游节点解释）
+//   - llm_judge：交由 LLM 判断（v1 由模型在 mark_complete 时自评）
+type CheckType string
+
+const (
+	CheckTypeTestable CheckType = "testable"
+	CheckTypeManual   CheckType = "manual"
+	CheckTypeLLMJudge CheckType = "llm_judge"
+)
+
+// AcceptanceCriterion 节点的验收标准。
+//
+// 由上游节点（通常是父节点）在 create_node 时给出；本节点必须在 mark_complete
+// 时为每条 Required=true 的标准提供 AcceptanceResult，否则 runtime 拒绝完成。
+type AcceptanceCriterion struct {
+	ID           string    `json:"id"`
+	Description  string    `json:"description"`
+	Required     bool      `json:"required"`
+	CheckType    CheckType `json:"check_type"`
+	CheckCommand string    `json:"check_command,omitempty"` // testable 用
+	ExpectedExit int       `json:"expected_exit,omitempty"` // testable 用，默认 0
+	SourceNodeID string    `json:"source_node_id,omitempty"`
+}
+
+// AcceptanceResult 验收结果。模型在 mark_complete 时为每条标准填写。
+type AcceptanceResult struct {
+	CriterionID          string   `json:"criterion_id"`
+	Passed               bool     `json:"passed"`
+	Notes                string   `json:"notes,omitempty"`
+	EvidenceArtifactRefs []string `json:"evidence_artifact_refs,omitempty"`
+}
 
 // HumanRequest 是模型发出的结构化人类输入请求
 type HumanRequest struct {
@@ -53,7 +88,7 @@ type TaskNode struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	WetherTraveled bool // 是否已遍历过
-	WetherFinished bool // 是否已完成（主要用于 Loop 节点）
+	WetherFinished bool // 是否已完成
 	SingleFinished bool // Agentic Loop: LLM explicitly called mark_complete
 	Variables      map[string]interface{}
 	Index          int    // 节点全局索引
@@ -81,6 +116,10 @@ type TaskNode struct {
 	// Human-in-the-loop
 	HumanRequest  *HumanRequest  `json:"human_request,omitempty"`
 	HumanResponse *HumanResponse `json:"human_response,omitempty"`
+
+	// === Acceptance criteria（替代 Loop 的迭代语义）===
+	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
+	AcceptanceResults  []AcceptanceResult    `json:"acceptance_results,omitempty"`
 
 	mutex sync.Mutex
 }
@@ -187,7 +226,7 @@ func (t *TaskNode) AllChildrenTraveled() bool {
 	return true
 }
 
-// AllChildrenFinished 检查所有子节点是否都已完成（用于 Loop 节点）
+// AllChildrenFinished 检查所有子节点是否都已完成
 func (t *TaskNode) AllChildrenFinished() bool {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -211,7 +250,7 @@ func (t *TaskNode) GetNextUntraveledChild() *TaskNode {
 	return nil
 }
 
-// ResetChildrenStatus 重置所有子节点的遍历和完成状态（用于 Loop 节点重新执行）
+// ResetChildrenStatus 重置所有子节点的遍历和完成状态（用于节点根据验收标准重试）
 func (t *TaskNode) ResetChildrenStatus() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -235,13 +274,9 @@ func (t *TaskNode) RestoreParents() {
 
 // AppendSiblingAfter 在当前节点之后插入一个同级节点。
 // 禁止在 root 节点（无 Parent）上调用。
-// 禁止在 Loop 节点的直接子节点上调用（Loop 语义尚未验证）。
 func (t *TaskNode) AppendSiblingAfter(sibling *TaskNode) error {
 	if t.Parent == nil {
 		return fmt.Errorf("cannot append sibling to root node")
-	}
-	if t.Parent.Type == Loop {
-		return fmt.Errorf("append_sibling_node is not allowed inside a Loop node (v1 restriction)")
 	}
 
 	parent := t.Parent

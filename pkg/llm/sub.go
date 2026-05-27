@@ -10,18 +10,8 @@ type StubEngine struct{}
 
 func (s *StubEngine) Call(prompt string) (*Output, error) {
 	// 返回一个符合格式的测试响应
-	// 根据 prompt 内容，返回创建节点的响应
 	response := Response{
 		Actions: []Action{
-			{
-				ActionType: "create_node",
-				Node: NodeDTO{
-					ID:          "child_loop_1",
-					Name:        "Loop Node",
-					Type:        "Loop",
-					Information: "这个节点需要循环处理",
-				},
-			},
 			{
 				ActionType: "create_node",
 				Node: NodeDTO{

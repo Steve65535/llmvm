@@ -37,20 +37,6 @@ func TestAppendSiblingAfterRoot(t *testing.T) {
 	}
 }
 
-func TestAppendSiblingAfterLoopChild(t *testing.T) {
-	root := NewTaskNode("root", "Root", Normal, nil)
-	loop := NewTaskNode("loop", "Loop", Loop, nil)
-	child := NewTaskNode("c1", "Child", Leaf, nil)
-	root.AddChild(loop)
-	loop.AddChild(child)
-
-	sibling := NewTaskNode("sib", "Sib", Leaf, nil)
-	err := child.AppendSiblingAfter(sibling)
-	if err == nil {
-		t.Error("expected error when appending sibling inside Loop")
-	}
-}
-
 func TestAppendSiblingAfterLast(t *testing.T) {
 	root := NewTaskNode("root", "Root", Normal, nil)
 	child1 := NewTaskNode("c1", "Child1", Leaf, nil)

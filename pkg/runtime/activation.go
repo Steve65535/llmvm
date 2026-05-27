@@ -1,10 +1,14 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Steve65535/llmvm/pkg/memory"
+	"github.com/Steve65535/llmvm/pkg/resolver"
+	"github.com/Steve65535/llmvm/pkg/retrieval"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 )
 
@@ -217,11 +221,14 @@ func (r *Runtime) buildArtifactIndex() []memory.ArtifactBrief {
 	return combined
 }
 
-// formatActivationContext 将 NodeActivation 格式化为 prompt 字符串（预算感知）。
+// formatActivationContext 将 NodeActivation 格式化为 prompt 字符串。
+//
+// 文档 2 取消固定比例预算：context pack 只受总预算软约束（在 buildPromptInternalV2 末段
+// 整体裁剪），单段不再有硬上限。Context Pack Builder 按相关性优先填充。
 func (r *Runtime) formatActivationContext(act NodeActivation, current *tasknode.TaskNode) string {
 	var sb strings.Builder
 
-	// 1. 层级路径（必需，无预算限制）
+	// 1. 层级路径
 	sb.WriteString("## Hierarchy Path\n")
 	for _, n := range act.HierarchyPath {
 		prefix := strings.Repeat("  ", n.Depth)
@@ -238,27 +245,25 @@ func (r *Runtime) formatActivationContext(act NodeActivation, current *tasknode.
 		sb.WriteString(act.ParentGoal + "\n")
 	}
 
-	// 3. 兄弟 handoff（预算：MaxHandoffChars）
+	// 3. 兄弟 handoff
 	if len(act.SiblingHandoffs) > 0 {
 		sb.WriteString("\n## Sibling Handoffs\n")
-		handoffStr := formatSiblingHandoffs(act.SiblingHandoffs)
-		if len(handoffStr) > r.budget.MaxHandoffChars {
-			handoffStr = handoffStr[:r.budget.MaxHandoffChars] + "\n... [HANDOFFS TRUNCATED]"
-		}
-		sb.WriteString(handoffStr)
+		sb.WriteString(formatSiblingHandoffs(act.SiblingHandoffs))
 	}
 
-	// 4. Artifact 索引（预算：MaxArtifactIndexChars）
+	// 4. Artifact 索引（不再硬限字符数；rerank + 全局预算共同决定）
 	sb.WriteString("\n## Available Artifacts\n")
-	sb.WriteString(formatArtifactBriefs(act.ArtifactIndex, r.budget.MaxArtifactIndexChars))
+	sb.WriteString(formatArtifactBriefs(act.ArtifactIndex, 0))
 
-	// 5. 树索引（预算：MaxTreeIndexChars）
+	// 5. 树索引：超过软目标后切换到只显示祖先 + 兄弟 + 最近完成节点的裁剪版
 	root := r.cursor.GetRoot()
 	if root != nil {
 		sb.WriteString("\n## Tree Index\n")
 		treeIdx := r.getTreeIndex(root, 0)
-		if len(treeIdx) > r.budget.MaxTreeIndexChars {
-			treeIdx = r.getRelevantTreeIndex(current, r.budget.MaxTreeIndexChars)
+		// 软阈值：tree index 不应吞掉超过总预算字符的 1/8
+		softLimit := r.budget.ContextTokenLimit * 4 / 8
+		if softLimit > 0 && len(treeIdx) > softLimit {
+			treeIdx = r.getRelevantTreeIndex(current, softLimit)
 		}
 		sb.WriteString(treeIdx)
 	}
@@ -324,4 +329,148 @@ func firstInfo(info []string) string {
 		return info[0]
 	}
 	return ""
+}
+
+// === ContextPack pipeline (Phase 10) ===
+
+// ContextPack 是节点激活后的最终上下文打包结果。
+//
+// 流程（按文档 2）：
+//   BuildPosition(node)
+//     -> buildNodeActivation(node)        （deterministic 字段：祖先链、handoff、artifact 索引）
+//     -> retrievalSvc.Query(...)          （混合检索 + rerank，Leaf 节点必走）
+//     -> resolver.Resolve(...) for big artifacts
+//     -> AssembleContextPack
+//
+// ContextPack 不替代 NodeActivation，它在 Activation 之上加了一层"按 position 决定收什么"。
+type ContextPack struct {
+	PositionSummary string
+	Activation      NodeActivation
+	Retrieved       []retrieval.RetrievedItem
+	ResolvedSpans   []resolver.EvidenceSpan
+	Omissions       []string
+	BudgetUsed      int
+	WorkingContext  string // 最终 prompt 字符串（兼容老路径）
+}
+
+// BuildContextPack 是 buildGlobalContext 的"位置工程版"：根据 Position 决定要不要走 retrieval。
+//
+// 第一版规则（确定性，不调 LLM 规划检索）：
+//   - Root：只读 artifact 索引 + 顶层子节点 handoff，不做语义召回（顶层不该被噪声污染）
+//   - Planner / Executor / ErrorHandler：如果节点有 Goal 或 acceptance criteria，自动跑一次
+//     retrieval 召回相关 artifact，并对超过阈值的 artifact 调 resolver 缩小
+//
+// 不改变 cursor 或 LLM 调用次数：retrieval/resolver 都是本地索引操作。
+func (r *Runtime) BuildContextPack(current *tasknode.TaskNode, pos Position) ContextPack {
+	pack := ContextPack{
+		PositionSummary: FormatPositionSummary(pos),
+		Activation:      r.buildNodeActivation(current),
+	}
+
+	// Root 不跑语义召回（避免顶层被污染）
+	if pos.Role == RoleRoot || r.retrieve == nil {
+		pack.WorkingContext = pack.Activation.WorkingContext
+		return pack
+	}
+
+	// 收集查询信号
+	goal := current.Goal
+	if goal == "" && len(current.Information) > 0 {
+		goal = current.Information[0]
+	}
+	if goal == "" {
+		// 没有目标信号 → 不跑 retrieval，避免无意义召回
+		pack.WorkingContext = pack.Activation.WorkingContext
+		return pack
+	}
+
+	var acDesc []string
+	for _, c := range current.AcceptanceCriteria {
+		acDesc = append(acDesc, c.Description)
+	}
+
+	q := retrieval.Query{
+		NodeID:             current.ID,
+		Goal:               goal,
+		AcceptanceCriteria: acDesc,
+		Need:               goal,
+		ScopeFilter:        pos.Scope.DefaultArtifactScope,
+		MaxTokens:          r.budget.RetrievalTokenLimit,
+		TopK:               10,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := r.retrieve.Query(ctx, q)
+	if err != nil {
+		pack.Omissions = append(pack.Omissions, fmt.Sprintf("retrieval failed: %v", err))
+		pack.WorkingContext = pack.Activation.WorkingContext
+		return pack
+	}
+	pack.Retrieved = res.Items
+	pack.BudgetUsed = res.BudgetUsed
+
+	// 对超过 ArtifactInlineTokenLimit 的命中调 resolver
+	if r.resolver != nil && r.budget.ArtifactInlineTokenLimit > 0 {
+		threshold := r.budget.ArtifactInlineTokenLimit
+		for _, it := range res.Items {
+			if it.Brief.TokenCount <= threshold {
+				continue
+			}
+			rctx, rcancel := context.WithTimeout(context.Background(), 15*time.Second)
+			rres, rerr := r.resolver.Resolve(rctx, resolver.Request{
+				ArtifactID:         it.Brief.ID,
+				NodeID:             current.ID,
+				CurrentGoal:        goal,
+				AcceptanceCriteria: acDesc,
+				ContextNeed:        goal,
+				MaxTokens:          r.budget.ArtifactInlineTokenLimit,
+			})
+			rcancel()
+			if rerr != nil {
+				pack.Omissions = append(pack.Omissions, fmt.Sprintf("resolver(%s): %v", it.Brief.ID, rerr))
+				continue
+			}
+			pack.ResolvedSpans = append(pack.ResolvedSpans, rres.Evidence...)
+		}
+	}
+
+	// 拼最终 working context
+	pack.WorkingContext = formatContextPack(pack)
+	return pack
+}
+
+// formatContextPack 拼装 ContextPack 到 prompt 友好的字符串。
+func formatContextPack(p ContextPack) string {
+	var sb strings.Builder
+	sb.WriteString(p.Activation.WorkingContext)
+
+	if len(p.Retrieved) > 0 {
+		sb.WriteString("\n## Retrieved (rerank top results)\n")
+		sb.WriteString(fmt.Sprintf("budget_used=%d tokens\n", p.BudgetUsed))
+		for i, it := range p.Retrieved {
+			fmt.Fprintf(&sb, "%d. [%s] %s — score=%.3f %s\n",
+				i+1, it.Brief.ID, it.Brief.Title, it.FinalScore, it.Rationale)
+			if it.Brief.Summary != "" {
+				fmt.Fprintf(&sb, "   %s\n", it.Brief.Summary)
+			}
+		}
+	}
+	if len(p.ResolvedSpans) > 0 {
+		sb.WriteString("\n## Resolved Evidence (large artifacts compacted)\n")
+		for _, ev := range p.ResolvedSpans {
+			fmt.Fprintf(&sb, "lines %d-%d (%s):\n", ev.StartLine, ev.EndLine, ev.Rationale)
+			body := ev.Text
+			if len(body) > 1500 {
+				body = body[:1500] + "..."
+			}
+			fmt.Fprintf(&sb, "%s\n\n", body)
+		}
+	}
+	if len(p.Omissions) > 0 {
+		sb.WriteString("\n## Omissions\n")
+		for _, o := range p.Omissions {
+			fmt.Fprintf(&sb, "- %s\n", o)
+		}
+	}
+	return sb.String()
 }

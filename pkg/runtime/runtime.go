@@ -2,6 +2,7 @@ package runtime
 
 import (
 	// Added for os/exec output capture
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"     // Added as per instruction
@@ -10,56 +11,78 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Steve65535/llmvm/pkg/artifact"
 	"github.com/Steve65535/llmvm/pkg/cursor"
 	"github.com/Steve65535/llmvm/pkg/llm"
 	"github.com/Steve65535/llmvm/pkg/memory"
+	"github.com/Steve65535/llmvm/pkg/resolver"
+	"github.com/Steve65535/llmvm/pkg/retrieval"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
+	"github.com/Steve65535/llmvm/pkg/vector"
 	"github.com/Steve65535/llmvm/pkg/vfs"
 )
 
 const (
-	DefaultContextBudget   = 64000 // 默认总预算（token），可通过 CONTEXT_BUDGET 环境变量覆盖
-	MaxHistoryEntryLength  = 1000
+	DefaultContextBudget  = 64000 // 默认总预算（token），可通过 LLMVM_CONTEXT_TOKEN_LIMIT 或老 CONTEXT_BUDGET 覆盖
+	MaxHistoryEntryLength = 1000
 )
 
-// BudgetConfig 从总预算按比例派生的各段字符预算
+// BudgetConfig 上下文预算（位置工程改造后只保留全局 token 上限）。
+//
+// 文档 2 取消了固定比例派生：原先 MaxTreeIndexChars / MaxArtifactIndexChars / MaxHandoffChars
+// 把候选裁剪写死成模板，关键资料经常被排除。新策略：每次节点激活只要 prompt 总 token 不超过
+// ContextTokenLimit 即可，relevance-driven 的 Context Pack Builder 决定取舍。
+//
+//   - ContextTokenLimit:               最终发给模型的 prompt 上限（兼容字段名 ContextBudget）
+//   - RetrievalTokenLimit:             检索候选总预算（FTS+vector 合并后裁剪到这个上限再 rerank）
+//   - ArtifactInlineTokenLimit:        artifact 直接进入 prompt 的内联上限
+//   - ArtifactAsyncTokenThreshold:     超过这个阈值触发 resolver 异步缩小（Phase 9）
+//   - MaxCommandResultChars:           单次工具结果上限（read_artifact 切片用），保留兼容
 type BudgetConfig struct {
-	ContextBudget         int // 总预算（token）
-	MaxCommandResultChars int // 单次工具结果上限（字符）
-	MaxVariableDumpChars  int // 变量 dump 上限（字符）
-	MaxTreeIndexChars     int // 树索引预算（字符）
-	MaxArtifactIndexChars int // artifact 索引预算（字符）
-	MaxArtifactIndexSize  int // artifact 索引最多条数
-	MaxHandoffChars       int // 兄弟 handoff 预算（字符）
+	ContextBudget               int // 总 prompt 预算（token）
+	ContextTokenLimit           int // 同 ContextBudget，alias
+	RetrievalTokenLimit         int
+	ArtifactInlineTokenLimit    int
+	ArtifactAsyncTokenThreshold int
+	MaxCommandResultChars       int
 }
 
-// newBudgetConfig 从总预算按比例分配
-// 总预算 token → 乘以 4 估算字符数 → 按比例切分
-func newBudgetConfig(totalTokens int) BudgetConfig {
-	totalChars := totalTokens * 4 // 粗估 1 token ≈ 4 chars
-
-	return BudgetConfig{
-		ContextBudget:         totalTokens,
-		MaxCommandResultChars: totalChars * 6 / 100,  // 6% — 单次工具结果
-		MaxVariableDumpChars:  totalChars * 12 / 100,  // 12% — 变量 dump
-		MaxTreeIndexChars:     totalChars * 5 / 100,   // 5% — 树索引
-		MaxArtifactIndexChars: totalChars * 3 / 100,   // 3% — artifact 索引
-		MaxArtifactIndexSize:  20,                      // 条数硬限
-		MaxHandoffChars:       totalChars * 2 / 100,   // 2% — 兄弟 handoff
-	}
-}
-
-// loadContextBudget 从环境变量读取总预算
-func loadContextBudget() int {
-	if s := os.Getenv("CONTEXT_BUDGET"); s != "" {
-		if v, err := strconv.Atoi(s); err == nil && v > 0 {
-			return v
+// envInt 读取 env，缺省 fallback。允许多个 alias（如 LLMVM_CONTEXT_TOKEN_LIMIT 和 CONTEXT_BUDGET）。
+func envInt(fallback int, keys ...string) int {
+	for _, k := range keys {
+		if s := os.Getenv(k); s != "" {
+			if v, err := strconv.Atoi(s); err == nil && v > 0 {
+				return v
+			}
 		}
 	}
-	return DefaultContextBudget
+	return fallback
+}
+
+// newBudgetConfig 从 .env 读取全局上下文上限（替代原有比例派生）。
+func newBudgetConfig() BudgetConfig {
+	totalTokens := envInt(DefaultContextBudget, "LLMVM_CONTEXT_TOKEN_LIMIT", "CONTEXT_BUDGET")
+	retrieval := envInt(totalTokens/2, "LLMVM_RETRIEVAL_TOKEN_LIMIT")
+	inlineLimit := envInt(6000, "LLMVM_ARTIFACT_INLINE_TOKEN_LIMIT")
+	asyncThreshold := envInt(12000, "LLMVM_ARTIFACT_ASYNC_TOKEN_THRESHOLD")
+	cmdChars := envInt(8000, "LLMVM_COMMAND_RESULT_CHARS")
+
+	return BudgetConfig{
+		ContextBudget:               totalTokens,
+		ContextTokenLimit:           totalTokens,
+		RetrievalTokenLimit:         retrieval,
+		ArtifactInlineTokenLimit:    inlineLimit,
+		ArtifactAsyncTokenThreshold: asyncThreshold,
+		MaxCommandResultChars:       cmdChars,
+	}
+}
+
+// loadContextBudget 兼容老调用点，仅返回总 token 预算。
+func loadContextBudget() int {
+	return envInt(DefaultContextBudget, "LLMVM_CONTEXT_TOKEN_LIMIT", "CONTEXT_BUDGET")
 }
 
 // Runtime 是 LLM 运行时引擎
@@ -72,6 +95,10 @@ type Runtime struct {
 	artifacts   *artifact.Store
 	budget      BudgetConfig
 	memStore    *memory.Store // SQLite 结构化检索层
+	vecStore    *vector.Store // chromem-go 向量索引（语义召回，可选；nil 时降级为纯 FTS）
+	retrieve    *retrieval.Service // 混合检索 + 确定性 rerank
+	resolver    *resolver.Resolver // 大 artifact 缩小（Phase 9）
+	embedWG     sync.WaitGroup // 跟踪后台 embed goroutine（Shutdown / 测试用）
 
 	// Stagnation Detection
 	lastResponse    string
@@ -92,10 +119,10 @@ type Runtime struct {
 // NewRuntime 创建新的运行时实例。dbPath 为空时使用进程内 :memory: 库。
 func NewRuntime(engine llm.Engine, root *tasknode.TaskNode, dbPath ...string) *Runtime {
 	vfsInstance := vfs.New(".")
-	budget := newBudgetConfig(loadContextBudget())
-	fmt.Printf("📊 Context budget: %d tokens → tool result %d chars, vars %d chars, tree %d chars, artifacts %d chars, handoff %d chars\n",
-		budget.ContextBudget, budget.MaxCommandResultChars, budget.MaxVariableDumpChars,
-		budget.MaxTreeIndexChars, budget.MaxArtifactIndexChars, budget.MaxHandoffChars)
+	budget := newBudgetConfig()
+	fmt.Printf("📊 Context budget: total=%d retrieval=%d artifact_inline=%d artifact_async_threshold=%d\n",
+		budget.ContextTokenLimit, budget.RetrievalTokenLimit,
+		budget.ArtifactInlineTokenLimit, budget.ArtifactAsyncTokenThreshold)
 
 	sqlitePath := ":memory:"
 	if len(dbPath) > 0 && dbPath[0] != "" {
@@ -108,7 +135,28 @@ func NewRuntime(engine llm.Engine, root *tasknode.TaskNode, dbPath ...string) *R
 		fmt.Printf("🗄️  SQLite memory store: %s\n", sqlitePath)
 	}
 
-	return &Runtime{
+	// Vector store（chromem-go）：与 SQLite 互补；初始化失败降级为纯 FTS。
+	vecDir := os.Getenv("LLMVM_VECTOR_DIR")
+	if vecDir == "" {
+		if sqlitePath != ":memory:" {
+			ext := filepath.Ext(sqlitePath)
+			vecDir = strings.TrimSuffix(sqlitePath, ext) + ".chromem"
+		} else {
+			vecDir = ""
+		}
+	}
+	var vec *vector.Store
+	if vecDir != "" {
+		v, err := vector.New(vecDir)
+		if err != nil {
+			fmt.Printf("⚠️  Vector store init failed (%s): %v (FTS-only mode)\n", vecDir, err)
+		} else {
+			vec = v
+			fmt.Printf("🧭 Vector store: %s [embedder=%s]\n", vecDir, vec.EmbedderName())
+		}
+	}
+
+	rt := &Runtime{
 		engine:      engine,
 		cursor:      cursor.New(root),
 		nodeCounter: 0,
@@ -116,7 +164,98 @@ func NewRuntime(engine llm.Engine, root *tasknode.TaskNode, dbPath ...string) *R
 		artifacts:   artifact.New(),
 		budget:      budget,
 		memStore:    mem,
+		vecStore:    vec,
+		retrieve:    retrieval.NewService(mem, vec),
 	}
+	rt.resolver = resolver.New(rt.artifacts)
+	return rt
+}
+
+// IndexArtifactAsync 后台 embedding + 写 vector store。
+// 调用方持有 art 的快照（避免后台读 LRU 已淘汰的内容）。
+//
+// 在 mark_complete 完成 handoff 后，runtime 把节点产出的 artifact 批量异步入索引。
+// 当前 artifact 已在 SQLite + FTS 同步落库；vector 索引是异步补充。
+func (r *Runtime) IndexArtifactAsync(art *artifact.Artifact, content string) {
+	if r.vecStore == nil || art == nil {
+		return
+	}
+	r.embedWG.Add(1)
+	go func(id, body string, meta map[string]string) {
+		defer r.embedWG.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := r.vecStore.Upsert(ctx, id, body, meta); err != nil {
+			fmt.Printf("  ⚠️  vector upsert %s failed: %v\n", id, err)
+		}
+	}(art.ID, content, artifactVectorMeta(art))
+}
+
+// artifactVectorMeta 提取 artifact 元数据用于 chromem where 过滤。
+func artifactVectorMeta(art *artifact.Artifact) map[string]string {
+	meta := map[string]string{
+		"producer": art.CreatedBy,
+		"kind":     art.Type,
+		"scope":    string(art.Scope),
+	}
+	if art.Name != "" {
+		meta["name"] = art.Name
+	}
+	if art.Granularity != "" {
+		meta["granularity"] = art.Granularity
+	}
+	if art.Importance != "" {
+		meta["importance"] = art.Importance
+	}
+	return meta
+}
+
+// IndexNodeArtifactsAsync 在 mark_complete 触发 handoff 后调用：
+// 把当前节点产出的所有 artifact 批量异步 embed + 入向量库。
+//
+// 工作池上限 2，避免一次性把外部 embedding 服务（ollama）打满。
+// SQLite + FTS 已同步写入，这里只补 vector。
+func (r *Runtime) IndexNodeArtifactsAsync(node *tasknode.TaskNode) {
+	if r.vecStore == nil || node == nil {
+		return
+	}
+	arts := r.artifacts.ListByNode(node.ID)
+	if len(arts) == 0 {
+		return
+	}
+	const concurrency = 2
+	sem := make(chan struct{}, concurrency)
+	for _, art := range arts {
+		if art.Evicted {
+			continue
+		}
+		// 抓内容快照（spill 可能在后台被淘汰）
+		body := art.Content
+		if body == "" && art.SpillPath != "" {
+			if data, err := os.ReadFile(art.SpillPath); err == nil {
+				body = string(data)
+			}
+		}
+		if body == "" {
+			body = art.Summary
+		}
+		r.embedWG.Add(1)
+		sem <- struct{}{}
+		go func(id, content string, meta map[string]string) {
+			defer r.embedWG.Done()
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := r.vecStore.Upsert(ctx, id, content, meta); err != nil {
+				fmt.Printf("  ⚠️  vector upsert %s failed: %v\n", id, err)
+			}
+		}(art.ID, body, artifactVectorMeta(art))
+	}
+}
+
+// WaitForBackgroundIndexing 等待所有后台 embed 完成（测试 / shutdown 用）。
+func (r *Runtime) WaitForBackgroundIndexing() {
+	r.embedWG.Wait()
 }
 
 // Execute 执行深度优先搜索，构建语法树
@@ -165,7 +304,7 @@ func (r *Runtime) Execute(initialRequest string) error {
 		}
 
 		if current.WetherTraveled {
-			if current.Type == tasknode.Normal || current.Type == tasknode.Loop {
+			if current.Type == tasknode.Normal {
 				// 获取下一个未遍历的子节点
 				nextChild := current.GetNextUntraveledChild()
 				if nextChild != nil {
@@ -173,7 +312,7 @@ func (r *Runtime) Execute(initialRequest string) error {
 					r.cursor.MoveDown()
 					continue
 				} else {
-					// 所有已知的子节点都遍历过（不管完成与否），交由 decideNextStep 判断是否结束循环或继续
+					// 所有已知的子节点都遍历过（不管完成与否），交由 decideNextStep 判断
 					if err := r.decideNextStep(current); err != nil {
 						return err
 					}
@@ -382,12 +521,14 @@ func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request s
 // === Global Context 系统（替代 selectAttentionNodes） ===
 
 // buildGlobalContext 由 Runtime 自动组装全局上下文（0 额外 LLM 调用）。
-// 现在委托给 buildNodeActivation，提供更结构化的上下文。
+//
+// 现在委托给 BuildContextPack：先 BuildPosition，再走 retrieval + resolver pipeline。
 func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {
-	act := r.buildNodeActivation(current)
+	pos := BuildPosition(current)
+	pack := r.BuildContextPack(current, pos)
 	// 同步节点到 SQLite index
 	r.syncNodeToMemory(current)
-	return act.WorkingContext
+	return pack.WorkingContext
 }
 
 // getRelevantTreeIndex 大树裁剪：只展示祖先链 + 兄弟 + 最近完成节点
@@ -600,6 +741,40 @@ func (r *Runtime) getTreeIndex(node *tasknode.TaskNode, indent int) string {
 	return line
 }
 
+// formatAcceptanceCriteria 把节点的验收标准转成 prompt 段落。
+// 节点没有验收标准时返回空串（不输出空段，避免噪声）。
+func formatAcceptanceCriteria(node *tasknode.TaskNode) string {
+	if len(node.AcceptanceCriteria) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Acceptance Criteria (must satisfy before mark_complete)\n")
+	for _, c := range node.AcceptanceCriteria {
+		req := "optional"
+		if c.Required {
+			req = "REQUIRED"
+		}
+		sb.WriteString(fmt.Sprintf("- [%s] %s — check_type=%s [%s]",
+			c.ID, c.Description, c.CheckType, req))
+		if c.CheckCommand != "" {
+			sb.WriteString(fmt.Sprintf(" (cmd: `%s`)", c.CheckCommand))
+		}
+		sb.WriteString("\n")
+	}
+	// 已有结果回放
+	if len(node.AcceptanceResults) > 0 {
+		sb.WriteString("\n### Previous results\n")
+		for _, r := range node.AcceptanceResults {
+			status := "FAIL"
+			if r.Passed {
+				status = "PASS"
+			}
+			sb.WriteString(fmt.Sprintf("- %s: %s — %s\n", r.CriterionID, status, r.Notes))
+		}
+	}
+	return sb.String() + "\n"
+}
+
 // formatTreeIndexLine 格式化单个节点的索引行
 func (r *Runtime) formatTreeIndexLine(node *tasknode.TaskNode, indent int) string {
 	line := fmt.Sprintf("%s- [%s] %s (%s)", strings.Repeat("  ", indent), node.ID, node.Name, nodeStatusStr(node.Status))
@@ -705,25 +880,10 @@ func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request stri
 	// 获取当前节点的子节点状态信息
 	childrenInfo := r.getChildrenInfo(current)
 
-	// 获取当前是否在 Loop 中
-	isInLoop := r.cursor.IsInLoop()
-	currentLoop := r.cursor.GetCurrentLoop()
+	// Agentic Loop 状态：仅 Leaf 节点在多轮 ReAct 迭代时显示
 	loopInfo := ""
-	if isInLoop && currentLoop != nil {
-		loopInfo = fmt.Sprintf(`Currently inside Loop node: "%s" (ID: %s)
-- All children finished: %v
-- **To end this loop**: Mark the child node as 'finished' when the loop condition is met
-- **Loop variables**: Check the scoped variables below for loop counters (e.g., current_index, iteration_count)
-- **Important**: If you want to continue iterating, do NOT mark children as finished`,
-			currentLoop.Name, currentLoop.ID, currentLoop.AllChildrenFinished())
-	} else {
-		loopInfo = "Not currently in a Loop"
-	}
-
-	// 🆕 Inject Agentic Loop Context for Leaf nodes
 	if current.Type == tasknode.Leaf && current.IterationCount > 0 {
-		loopInfo += fmt.Sprintf(`
-> [!IMPORTANT]
+		loopInfo = fmt.Sprintf(`> [!IMPORTANT]
 > **AGENTIC LOOP ACTIVE (Iteration %d/%d)**
 > You are currently in an autonomous refinement loop for this Leaf node.
 >
@@ -733,20 +893,6 @@ func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request stri
 > - If you have completed the goal based on previous observations, you MUST call 'mark_complete' now.
 > - If the previous attempt failed or was insufficient, analyze the 'Command Execution History' below and try a DIFFERENT approach.
 > - DO NOT repeat the same ineffective command.`, current.IterationCount+1, current.MaxRetries)
-	}
-
-	// 🆕 Inject Reflection Context for Loop nodes
-	if current.Type == tasknode.Loop && !current.WetherTraveled && len(current.Variables) > 0 {
-		loopInfo += `
-> [!CAUTION] 
-> **REFLECTION MODE ALIVE**
-> You are re-evaluating this Loop node because the previous iteration did NOT finish all children successfully (some children failed or didn't meet the loop exit condition).
-> 
-> **Your Reflection Task**:
-> 1. **Analyze**: Read the 'Scoped Variables' below (especially 'last_error', 'command_output_history', or loop counters). Identify EXACTLY why the previous iteration failed or fell short.
-> 2. **Clean up**: Use 'update_variables' action to clear out stale variables (like old errors or temporary flags) by setting them to empty strings or null equivalents, so they don't pollute the next run.
-> 3. **Mutate AST**: You MUST output 'create_node' to regenerate the child nodes required for the next iteration (e.g., if you were processing index 5, create nodes to process index 6), OR create a specific error-handling node.
-> 4. Do NOT just repeat the exact same child nodes that just failed.`
 	}
 
 	// 构建请求结构
@@ -835,8 +981,17 @@ func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request stri
 		workspaceStr = workspaceStr[:globalContextBudget] + "\n... [GLOBAL CONTEXT TRUNCATED TO FIT BUDGET]"
 	}
 
+	// Position 摘要 + Allowed Actions（位置工程入口）
+	pos := BuildPosition(current)
+	positionSummary := FormatPositionSummary(pos)
+	allowedActions := FormatAllowedActions(pos)
+	acceptanceBlock := formatAcceptanceCriteria(current)
+
 	// 构建完整的 prompt
-	prompt := fmt.Sprintf(`## Current Context
+	prompt := fmt.Sprintf(`%s
+%s
+%s
+## Current Context
 
 **Task Path**: %s
 
@@ -887,21 +1042,18 @@ Please respond with valid JSON in the required format.
 **When to create each type**:
 - **Normal**: For tasks that can be decomposed into sequential sub-tasks
   - Example: "Build web app" → [Setup, Frontend, Backend, Deploy]
-  
-- **Loop**: For tasks that need iteration until a condition is met
-  - Example: "Verify all even numbers 4-1000" → Loop with condition check
-  - **Critical**: You MUST mark child nodes as 'finished' when the loop should end
-  
+
 - **Leaf**: For atomic tasks that can be completed in one step
   - Supports **Agentic Loop**: execute_command → observe result → refine → mark_complete
   - You can execute multiple commands before calling mark_complete
-  - Only call mark_complete when you are SATISFIED with the result
+  - Only call mark_complete when you are SATISFIED with the result AND your acceptance criteria are met
   - If you execute a command without mark_complete, you will get another turn
   - Should NOT have child nodes
 
+**Iteration semantics**: Loop nodes have been removed. If you need to retry until a condition holds, set acceptance criteria and let the runtime's retry budget drive iteration on the same node — do not create a Loop type.
+
 **Current node type**: %s
 - If Normal and has no children yet: Consider decomposing into sub-tasks
-- If Loop and children not finished: Continue iteration or mark finished to end loop
 - If Leaf: Execute the task directly using commands or mark_complete
 
 ## Execution Requirements (STRICT):
@@ -930,9 +1082,10 @@ Please respond with valid JSON in the required format.
    - **Error Handling**: For risky operations (I/O, network, complex calculations), you MUST provide an `+"`"+`error_handler_node`+"`"+` in your `+"`"+`create_node`+"`"+` action. Failure to do so will result in cascading failures and task termination.
    - **Completeness**: Every path in your tree MUST end with a `+"`"+`mark_complete`+"`"+` action.
 
-8. **Loop State Awareness**:
+8. **Acceptance-Driven Iteration**:
    - If a task fails or syntax errors occur, DO NOT repeat the same failing command.
-   - Ensure loop variables (e.g. 'current_even') are updated even if a sub-step has a minor logging error, to prevent infinite loops on the same number.
+   - Use 'update_variables' to record what was tried and why it failed before retrying with a different approach.
+   - Iteration is bounded by the node's acceptance criteria + retry budget — there is no Loop node.
 
 10. **Stagnation Defense**:
    - If you repeat the same observation command (e.g., 'cat results.txt') more than twice without creating a new node, marking a node complete, or updating variables, YOU ARE STAGNATED.
@@ -1004,9 +1157,12 @@ Please respond with valid JSON in the required format.
 - All string values must be in double quotes
 - No trailing commas
 - action_type must be exact (case-sensitive)
-- node.type must be exactly: Normal, Loop, or Leaf
+- node.type must be exactly: Normal or Leaf
 - **IMPORTANT**: Prefer append_to_file over echo commands to avoid shell escaping issues!
 `,
+		positionSummary,
+		allowedActions,
+		acceptanceBlock,
 		formatPath(taskPath),
 		current.ID, current.Name, nodeTypeStr(current.Type), nodeStatusStr(current.Status), current.Index,
 		current.WetherTraveled, current.WetherFinished, strings.Join(current.Information, "\n"),
@@ -1048,10 +1204,7 @@ func (r *Runtime) getChildrenInfo(node *tasknode.TaskNode) string {
 		}
 
 		childType := "Normal"
-		switch child.Type {
-		case tasknode.Loop:
-			childType = "Loop"
-		case tasknode.Leaf:
+		if child.Type == tasknode.Leaf {
 			childType = "Leaf"
 		}
 
@@ -1121,10 +1274,7 @@ func (r *Runtime) nodeToState(node *tasknode.TaskNode) llm.NodeState {
 	}
 
 	nodeType := "Normal"
-	switch node.Type {
-	case tasknode.Loop:
-		nodeType = "Loop"
-	case tasknode.Leaf:
+	if node.Type == tasknode.Leaf {
 		nodeType = "Leaf"
 	}
 
@@ -1246,6 +1396,12 @@ func formatVariables(vars map[string]interface{}, maxLen int) string {
 
 // executeAction 执行 LLM 返回的动作
 func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) error {
+	// Position-based authority check (fail-fast)
+	pos := BuildPosition(parent)
+	if err := CheckAuthority(pos, action.ActionType); err != nil {
+		return err
+	}
+
 	switch action.ActionType {
 	case "create_node":
 		// 创建新节点
@@ -1257,8 +1413,22 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 			errorHandler := action.ErrorHandlerNode.ToTaskNode()
 			childNode.ErrorHandler = errorHandler
 		}
+		// 继承祖先 Required 验收标准
+		r.inheritAcceptanceCriteria(childNode)
+		// 同步本节点 + 验收标准到 SQLite
+		r.syncNodeToMemory(childNode)
+		r.persistAcceptanceCriteria(childNode)
 		return nil
 	case "mark_complete":
+		// === Acceptance: 模型必须为每条 Required 标准给出 acceptance_result ===
+		if len(action.AcceptanceResults) > 0 {
+			r.applyAcceptanceResults(parent, action.AcceptanceResults)
+		}
+		if missing := r.missingRequiredAcceptance(parent); len(missing) > 0 {
+			fmt.Printf("  🚫 mark_complete blocked: missing required acceptance results for %v\n", missing)
+			return fmt.Errorf("mark_complete rejected: required acceptance criteria not satisfied: %s",
+				strings.Join(missing, ", "))
+		}
 		parent.SingleFinished = true
 		// 结构化摘要（优先 summary，向后兼容 result）
 		if action.Summary != "" {
@@ -1337,6 +1507,8 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		}
 		// 同步到 SQLite
 		r.syncNodeToMemory(parent)
+		// 节点 handoff 完成 → 异步把本节点产出的 artifact 批量 embed 入向量库
+		r.IndexNodeArtifactsAsync(parent)
 		fmt.Printf("  ✅ Action: mark_complete (Result: %s)\n", parent.Result)
 		return nil
 	case "update_variables":
@@ -1579,6 +1751,12 @@ func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) er
 		return r.handleAppendSiblingNode(action, parent)
 	case "query_memory":
 		return r.handleQueryMemory(action, parent)
+	case "add_artifact":
+		return r.handleAddArtifact(action, parent)
+	case "modify_artifact":
+		return r.handleModifyArtifact(action, parent)
+	case "request_context":
+		return r.handleRequestContext(action, parent)
 	default:
 		return fmt.Errorf("unknown action type: %s", action.ActionType)
 	}
@@ -1759,8 +1937,6 @@ func (r *Runtime) printTokenStats(prompt string, contextLimit int) {
 
 func nodeTypeStr(t tasknode.TaskType) string {
 	switch t {
-	case tasknode.Loop:
-		return "Loop"
 	case tasknode.Leaf:
 		return "Leaf"
 	default:
@@ -1784,32 +1960,15 @@ func nodeStatusStr(s tasknode.TaskStatus) string {
 }
 
 // decideNextStep 决定下一步：下树还是上树
-// 根据 detail.md 的描述：
-// - 对于普通节点：如果 wethertraveled 是 1，则寻找下一个子节点；如果全部子节点 wethertraveled，就返回上级
-// - 对于 Loop 节点：检查子节点是否都 finished，如果 finished 就 pop 栈并跳出 loop
+// - 对于 Normal 节点：如果 wethertraveled 是 1，则寻找下一个子节点；如果全部子节点 wethertraveled，就返回上级
 // - 对于 Leaf 节点：Agentic Loop（委派到 agentic_loop.go）
 func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
-	// 📍 Propagate variables to parent if parent is a Loop
-	if current.Parent != nil && current.Parent.Type == tasknode.Loop {
-		fmt.Printf("  🔄 Propagating state variables from child [%s] to Loop parent [%s]\n", current.ID, current.Parent.ID)
-		if current.Parent.Variables == nil {
-			current.Parent.Variables = make(map[string]interface{})
-		}
-		for k, v := range current.Variables {
-			// Skip ephemeral/scratchpad variables
-			if k == "command_output_history" || k == "last_command_result" {
-				continue
-			}
-			current.Parent.Variables[k] = v
-		}
-	}
-
 	// Agentic Loop: Delegate to agentic_loop.go
 	if r.HandleLeafAgenticLoop(current) {
 		return nil
 	}
 
-	// For Normal/Loop nodes:
+	// For Normal nodes:
 	// We only decide next step AFTER the node has been traveled (processed at least once).
 	if current.WetherTraveled {
 		// 1. Try to move down to the next untraveled child.
@@ -1822,53 +1981,7 @@ func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {
 		// 2. All children traveled. Check completion logic.
 		allFinished := current.AllChildrenFinished()
 
-		// Case: Loop node
-		if current.Type == tasknode.Loop {
-			if allFinished {
-				// Loop explicitly marked finished because all children are finished
-				if !current.WetherFinished {
-					current.MarkFinished()
-				}
-				r.cursor.MoveUp()
-				return nil
-			} else {
-				// 🔴 LOOP CONTINUATION / REFLECTION LOGIC
-				// Only reset if there are actually children. If there are 0 children,
-				// we shouldn't infinitely loop here without doing anything.
-				if len(current.Children) == 0 {
-					fmt.Printf("  ⚠️ Loop node [%s] has no children. Forcing completion to prevent infinite loop.\n", current.ID)
-					current.MarkFinished()
-					r.cursor.MoveUp()
-					return nil
-				}
-
-				fmt.Printf("  🔄 Loop node [%s] evaluates to continue (Not all children finished). Triggering reflection.\n", current.ID)
-
-				// 📍 STATE AGGREGATION: Accumulate variables from the LAST finished child (Optional but helpful)
-				lastChild := current.Children[len(current.Children)-1]
-				if lastChild.WetherFinished && lastChild.Variables != nil {
-					if current.Variables == nil {
-						current.Variables = make(map[string]interface{})
-					}
-					for k, v := range lastChild.Variables {
-						current.Variables[k] = v
-					}
-				}
-
-				// Reset children statuses so the cursor travels through them again next iteration
-				current.ResetChildrenStatus()
-
-				// 💥 TRIGER REFLECTION: Mark loop node itself as untraveled
-				// According to reflection.md: "if (node.wethertraveled == false) AND (node.variables != empty): -> 触发反思"
-				current.WetherTraveled = false
-
-				// We DO NOT MOVE CURSOR. Next iteration of main Run Loop will pick this node up,
-				// see it's untraveled, but has variables, and will call LLM to reflect and modify AST.
-				return nil
-			}
-		}
-
-		// Case: Normal node
+		// Normal node
 		if current.AllChildrenTraveled() || len(current.Children) == 0 {
 			if allFinished || len(current.Children) == 0 {
 				if !current.WetherFinished {
