@@ -1,0 +1,559 @@
+{
+  "root": "/Users/steve/Desktop/llmvm-rag-exp",
+  "generated_at": "2026-05-27T14:49:49.098909+00:00",
+  "count": 55,
+  "included_count": 48,
+  "skipped_count": 7,
+  "items": [
+    {
+      "path": ".git",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": ".git",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": ".gitignore",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": ".gitignore",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "AGENTS.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "AGENTS.md",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "CLAUDE.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "CLAUDE.md",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "README.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "README.md",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "README_CN.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "README_CN.md",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "UPDATE_PLAN.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "UPDATE_PLAN.md",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "cmd/config.json",
+      "kind": "config",
+      "language": "json",
+      "owner": "cmd/config.json",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "cmd/main.go",
+      "kind": "entrypoint",
+      "language": "go",
+      "owner": "cmd/main.go",
+      "include": true,
+      "reason": "entrypoint or binary path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "deep_compiler.json",
+      "kind": "config",
+      "language": "json",
+      "owner": "deep_compiler.json",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "go.mod",
+      "kind": "manifest",
+      "language": "mod",
+      "owner": "go.mod",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "go.sum",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "go.sum",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/position_engineering_deep_refactor.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/rag_artifact_position_engineering_experiment.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/artifact/store.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/artifact",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/artifact/store_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/artifact",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/cursor/cursor.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/cursor",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/api.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/async.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/engine.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/parser.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/parser_new_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/llm/parser_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/llm/parser_variable_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/llm/request.json",
+      "kind": "config",
+      "language": "json",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/response.json",
+      "kind": "config",
+      "language": "json",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/sub.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/memory/memory.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/memory",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/memory/memory_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/memory",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/runtime/actions.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/activation.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/agentic_loop.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/runtime.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/runtime_new_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/tasknode/tasknode.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/tasknode",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/tasknode/tasknode_new_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/tasknode",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/vfs/node.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/vfs",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/vfs/registry.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/vfs",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/vfs/vfs.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/vfs",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/.gitignore",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/README.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/eslint.config.js",
+      "kind": "source",
+      "language": "javascript",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/index.html",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/package-lock.json",
+      "kind": "config",
+      "language": "json",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/package.json",
+      "kind": "manifest",
+      "language": "json",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/public/vite.svg",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/src/App.css",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/src/App.jsx",
+      "kind": "source",
+      "language": "javascript",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/src/assets/react.svg",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/src/index.css",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/src/main.jsx",
+      "kind": "source",
+      "language": "javascript",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/frontend/vite.config.js",
+      "kind": "source",
+      "language": "javascript",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/go.mod",
+      "kind": "manifest",
+      "language": "mod",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/llmvm_vis_server",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "visualizer/server.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "visualizer",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    }
+  ]
+}

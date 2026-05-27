@@ -2,9 +2,7 @@
 .env
 .env.local
 .env.*.local
-
-# Test directory with logs and artifacts
-test/
+.envrc
 
 # Binaries for programs and plugins
 *.exe
@@ -23,8 +21,9 @@ main
 
 # Dependency directories
 vendor/
+node_modules/
 
-# Go workspace file
+# Local workspace files
 go.work
 
 # IDE specific files
@@ -37,11 +36,3 @@ go.work
 # OS specific files
 .DS_Store
 Thumbs.db
-
-# Documentation and research materials (not for open source)
-markdown/
-article/
-
-# Local agent guidance files
-AGENTS.md
-CLAUDE.md

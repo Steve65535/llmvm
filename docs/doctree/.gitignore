@@ -1,0 +1,7 @@
+.obsidian/
+.trash/
+.cache/
+exports/
+*.tmp
+*.bak
+
