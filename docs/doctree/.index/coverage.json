@@ -1,147 +1,118 @@
 {
   "mode": "architecture",
-  "generated_at": "2026-05-27T14:53:57Z",
+  "generated_at": "2026-05-29T00:00:00+08:00",
   "root": "/Users/steve/Desktop/llmvm-rag-exp",
+  "indexes": {
+    "paths": "docs/doctree/.index/paths.json",
+    "symbols": "docs/doctree/.index/symbols.json"
+  },
+  "summary": {
+    "paths_total": 104,
+    "paths_included_by_scanner": 84,
+    "paths_skipped_by_scanner": 20,
+    "symbols_total": 321,
+    "markdown_pages_generated": 17
+  },
   "pages": [
     "docs/doctree/README.md",
     "docs/doctree/模块/运行时引擎.md",
-    "docs/doctree/模块/运行时/执行循环与Prompt.md",
-    "docs/doctree/模块/运行时/节点激活上下文.md",
+    "docs/doctree/模块/运行时/执行循环与节点Turn.md",
     "docs/doctree/模块/运行时/Action执行与沙箱.md",
+    "docs/doctree/模块/运行时/位置工程与ContextPack.md",
     "docs/doctree/模块/LLM接口与Action协议.md",
-    "docs/doctree/模块/LLM接口/模型调用与Prompt协议.md",
     "docs/doctree/模块/LLM接口/JSON解析与Action校验.md",
+    "docs/doctree/模块/LLM接口/模型调用与Prompt协议.md",
     "docs/doctree/模块/任务树与游标.md",
+    "docs/doctree/模块/任务树/TaskNode数据模型.md",
+    "docs/doctree/模块/任务树/Cursor遍历.md",
     "docs/doctree/模块/Artifact与结构化记忆.md",
-    "docs/doctree/模块/状态与记忆/ArtifactStore.md",
-    "docs/doctree/模块/状态与记忆/SQLiteMemory.md",
-    "docs/doctree/运行与集成/CLI与可视化.md",
-    "docs/doctree/运行与集成/测试与配置.md"
+    "docs/doctree/模块/Artifact与记忆/ArtifactStore.md",
+    "docs/doctree/模块/Artifact与记忆/SQLiteMemory.md",
+    "docs/doctree/模块/Artifact与记忆/检索与Resolver.md",
+    "docs/doctree/运行与集成/CLI与状态持久化.md",
+    "docs/doctree/可视化/Visualizer.md"
   ],
-  "paths": {
-    "documented": [
-      "README.md",
-      "README_CN.md",
-      "AGENTS.md",
-      "cmd/main.go",
-      "pkg/runtime/runtime.go",
-      "pkg/runtime/activation.go",
-      "pkg/runtime/actions.go",
-      "pkg/runtime/agentic_loop.go",
-      "pkg/llm/api.go",
-      "pkg/llm/parser.go",
-      "pkg/llm/engine.go",
-      "pkg/llm/async.go",
-      "pkg/llm/sub.go",
-      "pkg/tasknode/tasknode.go",
-      "pkg/cursor/cursor.go",
-      "pkg/artifact/store.go",
-      "pkg/memory/memory.go",
-      "visualizer/server.go",
-      "visualizer/frontend/src/App.jsx",
-      "visualizer/frontend/package.json",
-      "go.mod",
-      "visualizer/go.mod"
-    ],
-    "skipped": [
-      {
-        "path": ".git",
-        "reason": "VCS metadata; scanner included it, but it is not documentation scope."
-      },
-      {
-        "path": "go.sum",
-        "reason": "Dependency checksum file."
-      },
-      {
-        "path": "visualizer/frontend/package-lock.json",
-        "reason": "Generated dependency lockfile."
-      },
-      {
-        "path": "visualizer/llmvm_vis_server",
-        "reason": "Compiled binary artifact."
-      },
-      {
-        "path": "deep_compiler.json",
-        "reason": "Large sample saved state; documented as visualizer fixture only."
-      },
-      {
-        "path": "cmd/config.json",
-        "reason": "Small config fixture; not central to architecture."
-      },
-      {
-        "path": "pkg/llm/request.json",
-        "reason": "Sample schema fixture; parser behavior documented through pkg/llm."
-      },
-      {
-        "path": "pkg/llm/response.json",
-        "reason": "Sample schema fixture; parser behavior documented through pkg/llm."
-      }
-    ],
-    "pending": [
-      "pkg/vfs/node.go",
-      "pkg/vfs/vfs.go",
-      "pkg/vfs/registry.go",
-      "visualizer/frontend/src/main.jsx",
-      "visualizer/frontend/src/App.css",
-      "visualizer/frontend/src/index.css",
-      "visualizer/frontend/vite.config.js",
-      "visualizer/frontend/eslint.config.js",
-      "UPDATE_PLAN.md",
-      "CLAUDE.md",
-      "markdown/position_engineering_deep_refactor.md",
-      "markdown/rag_artifact_position_engineering_experiment.md",
-      "markdown/terminal_ui_plan.md"
-    ],
-    "counts": {
-      "documented": 22,
-      "skipped": 8,
-      "pending": 13
+  "documented_source_paths": [
+    "README.md",
+    "cmd/main.go",
+    "cmd/state.go",
+    "pkg/runtime/runtime.go",
+    "pkg/runtime/execute.go",
+    "pkg/runtime/dispatch.go",
+    "pkg/runtime/agentic_loop.go",
+    "pkg/runtime/position.go",
+    "pkg/runtime/activation.go",
+    "pkg/runtime/shell.go",
+    "pkg/llm/parser.go",
+    "pkg/llm/api.go",
+    "pkg/llm/engine.go",
+    "pkg/llm/async.go",
+    "pkg/tasknode/tasknode.go",
+    "pkg/cursor/cursor.go",
+    "pkg/artifact/store.go",
+    "pkg/memory/memory.go",
+    "pkg/retrieval/retrieval.go",
+    "pkg/vector/vector.go",
+    "pkg/resolver/resolver.go",
+    "visualizer/server.go",
+    "visualizer/frontend/src/App.jsx"
+  ],
+  "documented_symbols": [
+    "runtime.Runtime",
+    "runtime.NewRuntime",
+    "runtime.Execute",
+    "runtime.runNodeTurn",
+    "runtime.decideNextStep",
+    "runtime.ExecuteAction",
+    "runtime.actionMarkComplete",
+    "runtime.actionExecuteCommand",
+    "runtime.HandleLeafAgenticLoop",
+    "runtime.BuildPosition",
+    "runtime.CheckAuthority",
+    "runtime.buildNodeActivation",
+    "llm.Engine",
+    "llm.ParseResponse",
+    "llm.CleanJSONString",
+    "llm.NodeDTO.ToTaskNode",
+    "tasknode.TaskNode",
+    "tasknode.NewTaskNode",
+    "tasknode.RestoreParents",
+    "cursor.Cursor",
+    "artifact.Artifact",
+    "artifact.Store.Add",
+    "artifact.Store.AddStructured",
+    "memory.Store",
+    "memory.New",
+    "retrieval.Service.Query",
+    "retrieval.computeFinalScore",
+    "resolver.Resolver.Resolve"
+  ],
+  "skipped": [
+    {
+      "path": "pkg/*/*_test.go",
+      "reason": "architecture mode covers tests only as supporting evidence; not every test function is documented"
+    },
+    {
+      "path": "markdown/*.md",
+      "reason": "design notes are indexed but not expanded into separate doctree pages in this architecture pass"
+    },
+    {
+      "path": "state1.json, state1.sqlite, state1.chromem/",
+      "reason": "local runtime state and generated retrieval data; potentially sensitive and not source documentation"
+    },
+    {
+      "path": "pkg/vfs/*",
+      "reason": "repository instructions identify vfs as legacy unless explicitly targeted"
     }
-  },
-  "symbols": {
-    "documented_representative": [
-      "cmd.main",
-      "cmd.SaveState",
-      "cmd.findWaitingHumanNodes",
-      "runtime.Runtime",
-      "runtime.NewRuntime",
-      "runtime.Execute",
-      "runtime.buildPromptWithGlobalContext",
-      "runtime.NodeActivation",
-      "runtime.buildNodeActivation",
-      "runtime.ExecuteAction",
-      "runtime.handleRequestHumanInput",
-      "runtime.ResumeWithHumanResponse",
-      "runtime.sandboxPath",
-      "llm.Engine",
-      "llm.APIEngine.Call",
-      "llm.ParseResponse",
-      "llm.NodeDTO.ToTaskNode",
-      "tasknode.TaskNode",
-      "tasknode.NewTaskNode",
-      "tasknode.AppendSiblingAfter",
-      "cursor.Cursor",
-      "artifact.Artifact",
-      "artifact.Store.Add",
-      "artifact.Store.ReadSlice",
-      "artifact.Store.Index",
-      "memory.Store",
-      "memory.New",
-      "memory.UpsertNode",
-      "memory.UpsertHandoff",
-      "memory.UpsertArtifact",
-      "memory.SearchArtifactsFTS",
-      "memory.Rebuild",
-      "visualizer.main",
-      "frontend.App"
-    ],
-    "pending": "Architecture mode did not document every private helper or every test function. See docs/doctree/.index/symbols.json for the generated symbol inventory."
-  },
+  ],
+  "pending": [
+    "Full mode could document every included path from paths.json and every public symbol from symbols.json.",
+    "Parser/action tests can be mapped to parser contract pages in a later coverage pass.",
+    "Runtime concurrency/timeout refactor is in active local changes; re-run doctree after that work settles if exact behavior changes again."
+  ],
   "notes": [
-    "This is architecture mode, not full mode. It documents the main runtime flow and representative public/internal APIs.",
-    "docs/doctree/.index/paths.json and symbols.json were generated with the repo-doctree skill scanners.",
-    "The generated paths scanner marked .git as included; coverage intentionally skips it.",
-    "The markdown/ directory is gitignored in this repository, but its design documents are listed as pending context rather than rewritten into the doctree."
+    "This is an architecture-mode doctree, not exhaustive API documentation.",
+    "The task tree remains the authoritative execution state; SQLite/vector stores are documented as rebuildable indexes.",
+    "Source links use absolute local paths so the client can open them directly in this workspace."
   ]
 }
-

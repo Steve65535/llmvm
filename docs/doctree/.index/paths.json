@@ -1,10 +1,50 @@
 {
   "root": "/Users/steve/Desktop/llmvm-rag-exp",
-  "generated_at": "2026-05-27T14:49:49.098909+00:00",
-  "count": 55,
-  "included_count": 48,
-  "skipped_count": 7,
+  "generated_at": "2026-05-29T07:13:55.345364+00:00",
+  "count": 104,
+  "included_count": 84,
+  "skipped_count": 20,
   "items": [
+    {
+      "path": ".claude/plan-artifact-getter.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": ".claude",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": ".claude/settings.local.json",
+      "kind": "config",
+      "language": "json",
+      "owner": ".claude",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": ".env",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": ".env",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": ".env.example",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": ".env.example",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
     {
       "path": ".git",
       "kind": "unknown",
@@ -86,12 +126,62 @@
       "status": "pending"
     },
     {
+      "path": "cmd/engine.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "cmd/engine.go",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "cmd/human.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "cmd/human.go",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
       "path": "cmd/main.go",
       "kind": "entrypoint",
       "language": "go",
       "owner": "cmd/main.go",
       "include": true,
       "reason": "entrypoint or binary path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "cmd/signals.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "cmd/signals.go",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "cmd/state.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "cmd/state.go",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "cmd/tree.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "cmd/tree.go",
+      "include": true,
+      "reason": "in-scope path",
       "doc_page": null,
       "status": "pending"
     },
@@ -126,6 +216,46 @@
       "status": "pending"
     },
     {
+      "path": "markdown/agentic_loop_goroutine_ast_refactor_rfc.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/agentic_loop_pi_agent_refactor_plan.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/architecture_review_issues.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/current_implementation_issue_report.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
       "path": "markdown/position_engineering_deep_refactor.md",
       "kind": "doc",
       "language": "markdown",
@@ -137,6 +267,36 @@
     },
     {
       "path": "markdown/rag_artifact_position_engineering_experiment.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/runtime_open_loops.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/terminal_ui_plan.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "markdown",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "markdown/tool_ecosystem_plugin_system_plan.md",
       "kind": "doc",
       "language": "markdown",
       "owner": "markdown",
@@ -226,6 +386,16 @@
       "status": "skipped"
     },
     {
+      "path": "pkg/llm/parser_phase_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
       "path": "pkg/llm/parser_test.go",
       "kind": "test",
       "language": "go",
@@ -244,6 +414,26 @@
       "reason": "test-only support",
       "doc_page": null,
       "status": "skipped"
+    },
+    {
+      "path": "pkg/llm/prompts/system.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/llm/prompts.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/llm",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
     },
     {
       "path": "pkg/llm/request.json",
@@ -296,6 +486,56 @@
       "status": "skipped"
     },
     {
+      "path": "pkg/resolver/resolver.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/resolver",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/resolver/resolver_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/resolver",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/resolver/test/sandbox/.artifacts/art_1.txt",
+      "kind": "test",
+      "language": "text",
+      "owner": "pkg/resolver",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/retrieval/retrieval.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/retrieval",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/retrieval/retrieval_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/retrieval",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
       "path": "pkg/runtime/actions.go",
       "kind": "source",
       "language": "go",
@@ -326,6 +566,126 @@
       "status": "pending"
     },
     {
+      "path": "pkg/runtime/artifact_getter.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/budget.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/context_assembly.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/dispatch.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/e2e_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/runtime/execute.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/index.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/position.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/position_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/runtime/prompt.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/prompt_template.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/prompts/node_prompt.md",
+      "kind": "doc",
+      "language": "markdown",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
       "path": "pkg/runtime/runtime.go",
       "kind": "source",
       "language": "go",
@@ -346,6 +706,26 @@
       "status": "skipped"
     },
     {
+      "path": "pkg/runtime/shell.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/runtime/tokens.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/runtime",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
       "path": "pkg/tasknode/tasknode.go",
       "kind": "source",
       "language": "go",
@@ -360,6 +740,26 @@
       "kind": "test",
       "language": "go",
       "owner": "pkg/tasknode",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "pkg/vector/vector.go",
+      "kind": "source",
+      "language": "go",
+      "owner": "pkg/vector",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "pkg/vector/vector_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "pkg/vector",
       "include": false,
       "reason": "test-only support",
       "doc_page": null,
@@ -394,6 +794,96 @@
       "reason": "in-scope path",
       "doc_page": null,
       "status": "pending"
+    },
+    {
+      "path": "state1.chromem/0f50505c/00000000.gob",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "state1.chromem",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "state1.json",
+      "kind": "config",
+      "language": "json",
+      "owner": "state1.json",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "state1.sqlite",
+      "kind": "unknown",
+      "language": "unknown",
+      "owner": "state1.sqlite",
+      "include": true,
+      "reason": "in-scope path",
+      "doc_page": null,
+      "status": "pending"
+    },
+    {
+      "path": "test/.gitignore",
+      "kind": "test",
+      "language": "unknown",
+      "owner": "test",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "test/llm_logs.txt",
+      "kind": "test",
+      "language": "text",
+      "owner": "test",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "test/log.txt",
+      "kind": "test",
+      "language": "text",
+      "owner": "test",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "test/sandbox/.artifacts/.gitkeep",
+      "kind": "test",
+      "language": "unknown",
+      "owner": "test",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "test/sandbox/.gitkeep",
+      "kind": "test",
+      "language": "unknown",
+      "owner": "test",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
+    },
+    {
+      "path": "test/sandbox/parser_smoke_test.go",
+      "kind": "test",
+      "language": "go",
+      "owner": "test",
+      "include": false,
+      "reason": "test-only support",
+      "doc_page": null,
+      "status": "skipped"
     },
     {
       "path": "visualizer/frontend/.gitignore",

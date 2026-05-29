@@ -279,6 +279,11 @@ This keeps `runtime.go` as the composition root, while execution behavior lives 
 
 ## Architecture
 
+![LLMVM Architecture](docs/architecture.png)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 graph TD
     User["User task"] --> CLI["CLI"]
@@ -303,6 +308,8 @@ graph TD
     Runtime --> Save["SaveState JSON"]
     Runtime --> Human["Human Interrupt"]
 ```
+
+</details>
 
 ## Project Structure
 

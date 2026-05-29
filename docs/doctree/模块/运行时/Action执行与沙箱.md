@@ -4,27 +4,30 @@
 
 ## `ExecuteAction(action llm.Action, parent *tasknode.TaskNode) error`
 
-- 源码：[pkg/runtime/runtime.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/runtime.go:1248)
+- 源码：[pkg/runtime/dispatch.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/dispatch.go:22)
 - 参数：
-  - `action`: LLM 返回的结构化 action。
-  - `parent`: 当前 action 所属节点。
-- 返回：执行错误。
-- 作用：根据 `action_type` 分发创建节点、更新变量、执行命令、读写文件、读取 artifact、mark complete、请求人类输入、追加 sibling、查询 memory 等行为。
-- 副作用：会修改任务树、节点变量、artifact store、SQLite memory、文件系统或 shell 状态。
+  - `action`: `llm.Action`，parser 已解码的 action。
+  - `parent`: `*tasknode.TaskNode`，当前节点。
+- 返回：`error`，action 越权、参数非法或执行失败时返回。
+- 作用：先根据 `BuildPosition` 做 authority check，再通过 switch 分发到具体 handler。
+- 副作用：所有任务树 mutation、工具调用、artifact 读写和 memory 查询都经由此入口。
 
-## `handleRequestHumanInput(action llm.Action, node *tasknode.TaskNode) error`
+## `actionMarkComplete(action llm.Action, parent *tasknode.TaskNode) error`
 
-- 源码：[pkg/runtime/actions.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/actions.go:27)
-- 作用：把模型的人类输入请求保存到节点，设置 `WaitingHuman`，并根据是否注入 `HumanInputFunc` 决定同步恢复还是返回 `ErrWaitingHuman`。
+- 源码：[pkg/runtime/dispatch.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/dispatch.go:88)
+- 作用：校验 acceptance results，写入 summary/handoff/key facts/artifact refs，并把节点状态设为 `Completed`。
+- 副作用：同步节点到 SQLite；pin 重要 artifact；异步索引节点 artifact 到 vector store。
+- 失败条件：required acceptance criterion 缺失时拒绝完成。
 
-## `ResumeWithHumanResponse(nodeID string, resp *tasknode.HumanResponse) error`
+## `actionExecuteCommand(action llm.Action, parent *tasknode.TaskNode) error`
 
-- 源码：[pkg/runtime/actions.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/actions.go:99)
-- 作用：找到等待人类输入的节点，写入结构化回复并恢复为 `Pending`。
+- 源码：[pkg/runtime/dispatch.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/dispatch.go:221)
+- 作用：执行 shell 命令，将完整输出存入 artifact，并把摘要写入 `command_output_history`。
+- 当前语义：命令 exit 非 0 被当作模型可观察结果，不再直接使 action 失败；只有命令无法启动等基础执行错误才应成为 infrastructure error。
+- 副作用：写 artifact store、FTS index、当前节点变量。
 
-## `sandboxPath(filePath string) (string, error)`
+## `sandboxPath(p string) (string, error)`
 
-- 源码：[pkg/runtime/runtime.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/runtime.go:2015)
-- 作用：把文件工具限制在 `test/sandbox/` 下，避免路径逃逸。
-- 注意：shell command 本身不是这个文件工具 sandbox 的一部分。
-
+- 源码：[pkg/runtime/shell.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/runtime/shell.go:31)
+- 作用：为 file tool 提供路径约束，确保文件操作限制在 `test/sandbox/` 内。
+- 注意：shell execution 与 file tool 的权限边界不同；shell 被设计成显式强能力。

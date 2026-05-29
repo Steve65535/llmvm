@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -79,157 +80,56 @@ func (r *Runtime) Execute(initialRequest string) error {
 
 		globalContext := r.buildGlobalContext(current)
 
-		var response *llm.Response
-		const maxRetries = 9
-		var lastErr error
-		retryCount := 0
-
-		for retryCount <= maxRetries {
-			prompt, err := r.buildPromptWithGlobalContext(current, initialRequest, globalContext, lastErr)
-			if err != nil {
-				return fmt.Errorf("failed to build prompt: %w", err)
-			}
-
-			if current.Index == -1 {
-				r.nodeCounter++
-				current.Index = r.nodeCounter
-			}
-
-			// 硬预算预检：循环压缩直到 prompt 落在预算内，或到极限后 fail-fast
-			for {
-				estimatedTokens := EstimateTokenCount(prompt)
-				if estimatedTokens <= r.budget.ContextBudget {
-					break
+		// 启动 goroutine worker 执行单次 turn：LLM 调用 + action 执行。
+		// 主循环阻塞在 channel 上——仍然是串行的，但获得了 timeout + panic 隔离。
+		ch := make(chan turnResult, 1)
+		ctx := context.Background()
+		cancel := func() {}
+		if r.LeafTurnTimeout > 0 {
+			ctx, cancel = context.WithTimeout(context.Background(), r.LeafTurnTimeout)
+		}
+		go func() {
+			defer cancel()
+			defer func() {
+				if p := recover(); p != nil {
+					ch <- turnResult{kind: turnFailed,
+						err: fmt.Errorf("panic in runNodeTurn: %v", p)}
 				}
-				if r.compressionLevel >= 4 {
-					lastErr = fmt.Errorf("prompt %d tokens exceeds budget %d even at max compression level 4", estimatedTokens, r.budget.ContextBudget)
-					retryCount++
-					fmt.Printf("  🚨 Budget hard limit: %v\n", lastErr)
-					break
-				}
-				r.compressionLevel++
-				fmt.Printf("  🗜️  Prompt %d tokens exceeds budget %d, pre-compressing to level %d\n",
-					estimatedTokens, r.budget.ContextBudget, r.compressionLevel)
-				prompt, err = r.buildPromptWithGlobalContext(current, initialRequest, globalContext, lastErr)
-				if err != nil {
-					return fmt.Errorf("failed to rebuild prompt: %w", err)
-				}
-			}
-			if lastErr != nil && r.compressionLevel >= 4 {
-				continue
-			}
+			}()
+			ch <- r.runNodeTurn(ctx, current, initialRequest, globalContext)
+		}()
+		res := <-ch
+		cancel()
 
-			fmt.Printf("  🤖 Calling LLM (Attempt %d)...\n", retryCount+1)
-			r.printTokenStats(prompt, r.budget.ContextBudget)
-
-			output, err := r.engine.Call(prompt)
-			if err != nil {
-				if isContextOverflow(err) {
-					if r.compressionLevel >= 4 {
-						lastErr = fmt.Errorf("context overflow persists at max compression (level %d): %w", r.compressionLevel, err)
-						retryCount++
-						continue
-					}
-					r.compressionLevel++
-					fmt.Printf("  🗜️  Context overflow detected, escalating compression to level %d\n", r.compressionLevel)
-					continue
-				}
-				lastErr = fmt.Errorf("LLM call failed: %w", err)
-				retryCount++
-				continue
+		switch res.kind {
+		case turnShutdown:
+			return res.err
+		case turnWaitingHuman:
+			fmt.Printf("  ⏸️  Node [%s] paused: waiting for human input\n", current.ID)
+			if r.OnStepComplete != nil {
+				r.OnStepComplete(current)
 			}
-
-			response, lastErr = llm.ParseResponse(output.Response)
-			if lastErr != nil {
-				retryCount++
-				continue
+			return ErrWaitingHuman
+		case turnFailed:
+			current.Status = tasknode.Failed
+			current.Result = fmt.Sprintf("Error: %v", res.err)
+			r.syncNodeToMemory(current)
+			if err := r.decideNextStep(current); err != nil {
+				return err
 			}
-
-			// Stagnation Detection: identical response 累计
-			if output.Response == r.lastResponse {
-				r.stagnationCount++
-				fmt.Printf("  ⚠️  Stagnation Detected (Level %d/4) for node [%s]\n", r.stagnationCount, current.ID)
-				if r.stagnationCount >= 4 {
-					fmt.Printf("  🚨 CRITICAL STAGNATION: LLM is stuck repeating itself. Forcing node failure.\n")
-					current.Status = tasknode.Failed
-					current.Result = "Error: Critical Stagnation - LLM repeated the exact same response 4 times."
-					if err := r.decideNextStep(current); err != nil {
-						return err
-					}
-					break
-				} else if r.stagnationCount >= 2 {
-					lastErr = fmt.Errorf("STAGNATION_DETECTED: You are repeating your previous response exactly. Break the loop! Change your strategy or create a new node to progress.")
-					retryCount++
-					continue
-				}
-			} else {
-				r.lastResponse = output.Response
-				r.stagnationCount = 0
-			}
-
-			actionErr := false
-			for _, action := range response.Actions {
-				if err := r.ExecuteAction(action, current); err != nil {
-					if strings.Contains(err.Error(), "EMERGENCY_SHUTDOWN") {
-						return err
-					}
-					// WaitingHuman：持久化暂停，返回哨兵错误让 cmd/main.go 退出
-					if errors.Is(err, ErrWaitingHuman) {
-						fmt.Printf("  ⏸️  Node [%s] paused: waiting for human input\n", current.ID)
-						if r.OnStepComplete != nil {
-							r.OnStepComplete(current)
-						}
-						return ErrWaitingHuman
-					}
-					lastErr = fmt.Errorf("failed to execute action: %w", err)
-					if r.handleError(current, lastErr) {
-						actionErr = false
-						break
-					}
-					actionErr = true
-					break
-				}
-			}
-
-			if actionErr {
-				current.RetryCount++
-				if current.RetryCount > current.MaxRetries {
-					fmt.Printf("⚠️ Max retries (%d) reached for node [%s]. Marking as Failed and continuing...\n", current.MaxRetries, current.ID)
-					current.Status = tasknode.Failed
-					current.Result = fmt.Sprintf("Error: Maximum retries reached. Last error: %v", lastErr)
-					if err := r.decideNextStep(current); err != nil {
-						return err
-					}
-					break
-				}
-				continue
-			}
-
-			fmt.Printf("  ✅ Step processed successfully: %d action(s)\n", len(response.Actions))
+		case turnOK:
 			if !current.WetherTraveled {
 				current.MarkTraveled()
 			}
 			current.RetryCount = 0
-			break
 		}
 
-		// API/解析/停滞耗尽 retry，节点未被 Failed → 兜底
-		if retryCount > maxRetries && current.Status != tasknode.Failed {
-			fmt.Printf("⚠️ Max LLM API retries (%d) reached for node [%s]. Marking as Failed and continuing...\n", maxRetries, current.ID)
-			current.Status = tasknode.Failed
-			current.Result = fmt.Sprintf("Error: Maximum LLM/API retries reached. Last error: %v", lastErr)
+		if current.Status != tasknode.Failed {
+			if err := r.decideNextStep(current); err != nil {
+				return fmt.Errorf("failed to decide next step: %w", err)
+			}
 		}
 
-		// 节点已 Failed（重试循环中处理过）→ 跳过外层 decideNextStep
-		if current.Status == tasknode.Failed {
-			goto stepDone
-		}
-
-		if err := r.decideNextStep(current); err != nil {
-			return fmt.Errorf("failed to decide next step: %w", err)
-		}
-
-	stepDone:
 		if r.OnStepComplete != nil {
 			r.OnStepComplete(current)
 		}
@@ -317,4 +217,164 @@ func (r *Runtime) hasUnfinishedChildren(node *tasknode.TaskNode) bool {
 		}
 	}
 	return false
+}
+
+// turnKind 描述单次 LLM turn 的结果类型。
+type turnKind int
+
+const (
+	turnOK           turnKind = iota // actions 执行成功，节点继续
+	turnFailed                       // 节点应标记 Failed
+	turnWaitingHuman                 // 节点暂停等待人类输入
+	turnShutdown                     // EMERGENCY_SHUTDOWN
+)
+
+// turnResult 是 runNodeTurn 的返回值。
+type turnResult struct {
+	kind     turnKind
+	response *llm.Response
+	err      error
+}
+
+// runNodeTurn 执行单次节点 LLM turn：build prompt → budget check → Call → parse → stagnation → ExecuteAction。
+//
+// 调用方（Execute 主循环）负责 cursor 推进和 AST 状态变更；
+// 本方法只做 LLM 交互和 action 执行，不碰 cursor。
+// 通过 ctx 支持超时取消；panic 由调用方的 goroutine recover 捕获。
+func (r *Runtime) runNodeTurn(ctx context.Context, current *tasknode.TaskNode,
+	initialRequest, globalContext string) turnResult {
+
+	const maxRetries = 9
+	var lastErr error
+	retryCount := 0
+
+	for retryCount <= maxRetries {
+		// 检查 ctx 是否已取消（超时）
+		select {
+		case <-ctx.Done():
+			return turnResult{kind: turnFailed, err: fmt.Errorf("turn timeout: %w", ctx.Err())}
+		default:
+		}
+
+		prompt, err := r.buildPromptWithGlobalContext(current, initialRequest, globalContext, lastErr)
+		if err != nil {
+			return turnResult{kind: turnFailed, err: fmt.Errorf("failed to build prompt: %w", err)}
+		}
+
+		if current.Index == -1 {
+			r.nodeCounter++
+			current.Index = r.nodeCounter
+		}
+
+		// 硬预算预检：循环压缩直到 prompt 落在预算内
+		for {
+			estimatedTokens := EstimateTokenCount(prompt)
+			if estimatedTokens <= r.budget.ContextBudget {
+				break
+			}
+			if r.compressionLevel >= 4 {
+				lastErr = fmt.Errorf("prompt %d tokens exceeds budget %d even at max compression level 4",
+					estimatedTokens, r.budget.ContextBudget)
+				retryCount++
+				fmt.Printf("  🚨 Budget hard limit: %v\n", lastErr)
+				break
+			}
+			r.compressionLevel++
+			fmt.Printf("  🗜️  Prompt %d tokens exceeds budget %d, pre-compressing to level %d\n",
+				estimatedTokens, r.budget.ContextBudget, r.compressionLevel)
+			prompt, err = r.buildPromptWithGlobalContext(current, initialRequest, globalContext, lastErr)
+			if err != nil {
+				return turnResult{kind: turnFailed, err: fmt.Errorf("failed to rebuild prompt: %w", err)}
+			}
+		}
+		if lastErr != nil && r.compressionLevel >= 4 {
+			continue
+		}
+
+		fmt.Printf("  🤖 Calling LLM (Attempt %d)...\n", retryCount+1)
+		r.printTokenStats(prompt, r.budget.ContextBudget)
+
+		output, err := r.engine.Call(prompt)
+		if err != nil {
+			if isContextOverflow(err) {
+				if r.compressionLevel >= 4 {
+					lastErr = fmt.Errorf("context overflow persists at max compression (level %d): %w",
+						r.compressionLevel, err)
+					retryCount++
+					continue
+				}
+				r.compressionLevel++
+				fmt.Printf("  🗜️  Context overflow detected, escalating compression to level %d\n",
+					r.compressionLevel)
+				continue
+			}
+			lastErr = fmt.Errorf("LLM call failed: %w", err)
+			retryCount++
+			continue
+		}
+
+		response, parseErr := llm.ParseResponse(output.Response)
+		if parseErr != nil {
+			lastErr = parseErr
+			retryCount++
+			continue
+		}
+
+		// Stagnation Detection
+		if output.Response == r.lastResponse {
+			r.stagnationCount++
+			fmt.Printf("  ⚠️  Stagnation Detected (Level %d/4) for node [%s]\n", r.stagnationCount, current.ID)
+			if r.stagnationCount >= 4 {
+				fmt.Printf("  🚨 CRITICAL STAGNATION: LLM is stuck repeating itself. Forcing node failure.\n")
+				return turnResult{
+					kind: turnFailed,
+					err:  fmt.Errorf("Critical Stagnation - LLM repeated the exact same response 4 times"),
+				}
+			} else if r.stagnationCount >= 2 {
+				lastErr = fmt.Errorf("STAGNATION_DETECTED: You are repeating your previous response exactly. Break the loop! Change your strategy or create a new node to progress.")
+				retryCount++
+				continue
+			}
+		} else {
+			r.lastResponse = output.Response
+			r.stagnationCount = 0
+		}
+
+		// Execute actions
+		actionErr := false
+		for _, action := range response.Actions {
+			if err := r.ExecuteAction(action, current); err != nil {
+				if strings.Contains(err.Error(), "EMERGENCY_SHUTDOWN") {
+					return turnResult{kind: turnShutdown, err: err}
+				}
+				if errors.Is(err, ErrWaitingHuman) {
+					return turnResult{kind: turnWaitingHuman, err: ErrWaitingHuman}
+				}
+				lastErr = fmt.Errorf("failed to execute action: %w", err)
+				if r.handleError(current, lastErr) {
+					actionErr = false
+					break
+				}
+				actionErr = true
+				break
+			}
+		}
+
+		if actionErr {
+			current.RetryCount++
+			if current.RetryCount > current.MaxRetries {
+				return turnResult{
+					kind: turnFailed,
+					err:  fmt.Errorf("Maximum retries reached. Last error: %v", lastErr),
+				}
+			}
+			continue
+		}
+
+		fmt.Printf("  ✅ Step processed successfully: %d action(s)\n", len(response.Actions))
+		return turnResult{kind: turnOK, response: response}
+	}
+
+	// retry 耗尽
+	return turnResult{kind: turnFailed, err: fmt.Errorf("Maximum LLM/API retries reached. Last error: %v", lastErr)}
 }

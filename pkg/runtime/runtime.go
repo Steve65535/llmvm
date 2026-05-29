@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Steve65535/llmvm/pkg/artifact"
 	"github.com/Steve65535/llmvm/pkg/cursor"
@@ -64,6 +65,10 @@ type Runtime struct {
 
 	// OnStepComplete is called after each node execution step
 	OnStepComplete func(*tasknode.TaskNode)
+
+	// LeafTurnTimeout 单次 leaf turn 的超时（含 LLM 调用 + action 执行）。
+	// 0 表示不超时（默认）。
+	LeafTurnTimeout time.Duration
 
 	// HumanInputFunc 是 runtime 请求人类输入时调用的函数。
 	// 如果为 nil，则使用标准输入（stdin）。

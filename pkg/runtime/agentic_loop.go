@@ -13,19 +13,22 @@ func (r *Runtime) HandleLeafAgenticLoop(current *tasknode.TaskNode) bool {
 		return false
 	}
 
-	// 🔧 FIX(Defect 3): 如果节点已经 Failed 或 Finished，强制完成并上移，防止死循环
-	if current.Status == tasknode.Failed || current.WetherFinished {
-		fmt.Printf("  ❌ Leaf [%s] is Failed/Finished, forcing MoveUp\n", current.ID)
+	// 节点已终止（Completed 或 Failed）→ 清理 scratchpad 并上移，防止死循环。
+	// 注意：Failed 节点不能调 MarkFinished()，否则 Status 会被改写为 Completed。
+	if current.IsTerminal() {
+		fmt.Printf("  ❌ Leaf [%s] is terminal (status=%v finished=%v), forcing MoveUp\n",
+			current.ID, current.Status, current.WetherFinished)
 		r.clearLeafScratchpad(current)
 		if !current.WetherFinished {
-			current.MarkFinished()
+			// 只标记 WetherFinished，不改 Status（保留 Failed）
+			current.WetherFinished = true
 		}
 		r.cursor.MoveUp()
 		return true
 	}
 
-	if current.SingleFinished {
-		// LLM 明确说“我做完了” (mark_complete)
+	if current.Status == tasknode.Completed {
+		// LLM 明确说"我做完了" (mark_complete)，acceptance 已通过
 		fmt.Printf("  ✅ Leaf [%s] marked complete by LLM, cleaning up scratchpad and popping\n", current.ID)
 		r.clearLeafScratchpad(current)
 		current.MarkFinished()
@@ -51,7 +54,7 @@ func (r *Runtime) HandleLeafAgenticLoop(current *tasknode.TaskNode) bool {
 
 	// Stay: 核心机制
 	// 我们不 MoveUp，而是留在当前节点。
-	// 为了让主循环下一轮继续处理它，我们需要标记它为“未遍历”。
+	// 为了让主循环下一轮继续处理它，我们需要标记它为"未遍历"。
 	// 这样 Execute 逻辑就会再次为它准备 Context 并呼叫 LLM。
 	fmt.Printf("  🔄 Leaf [%s] continuing Agentic Loop (Iteration: %d/%d)\n", current.ID, current.IterationCount+1, current.MaxRetries)
 	current.WetherTraveled = false

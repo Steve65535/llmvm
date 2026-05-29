@@ -106,8 +106,8 @@ func TestEndToEndAddArtifactAndAcceptance(t *testing.T) {
 		t.Fatalf("expected 1 child, got %d", len(root.Children))
 	}
 	leaf := root.Children[0]
-	if !leaf.SingleFinished {
-		t.Errorf("leaf should have SingleFinished=true (mark_complete called)")
+	if leaf.Status != tasknode.Completed {
+		t.Errorf("leaf should have Status=Completed (mark_complete called)")
 	}
 	if len(leaf.AcceptanceCriteria) != 1 || leaf.AcceptanceCriteria[0].ID != "leaf1_ac_1" {
 		t.Errorf("expected single criterion with id=leaf1_ac_1, got %+v", leaf.AcceptanceCriteria)
@@ -209,7 +209,7 @@ func TestEndToEndMarkCompleteRejectedWithoutAcceptance(t *testing.T) {
 	}
 
 	leaf := root.Children[0]
-	if !leaf.SingleFinished {
+	if leaf.Status != tasknode.Completed {
 		t.Errorf("leaf should eventually be finished after second attempt")
 	}
 	if len(leaf.AcceptanceResults) != 1 {

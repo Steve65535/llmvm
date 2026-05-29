@@ -2,30 +2,21 @@
 
 上级：[[../README|项目总览]]
 
-## 职责
-
-`pkg/llm/` 是模型边界层，负责把 runtime prompt 发给模型，并把模型响应解析为严格的 JSON action 列表。这里是 LLMVM 的协议边界：prompt 可以指导模型，但 parser 和 runtime 必须负责最终校验。
-
-核心文件：
-
-- [pkg/llm/api.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/api.go:45)：DeepSeek/OpenAI-compatible chat API 调用和系统 prompt。
-- [pkg/llm/parser.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/parser.go:50)：Action DTO、Response DTO、JSON 清理和校验。
-- [pkg/llm/engine.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/engine.go:3)：模型引擎接口。
-- [pkg/llm/sub.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/sub.go:9)：StubEngine，用于无 API key 的测试运行。
+`pkg/llm` 定义模型调用接口、action DTO、JSON parser 和 prompt/API 文档。它是 LLM 输出进入 runtime 的第一道结构化边界。
 
 ## 子页面
 
-- [[LLM接口/模型调用与Prompt协议|模型调用与 Prompt 协议]]
-- [[LLM接口/JSON解析与Action校验|JSON 解析与 Action 校验]]
+- [[模块/LLM接口/JSON解析与Action校验|JSON 解析与 Action 校验]]
+- [[模块/LLM接口/模型调用与Prompt协议|模型调用与 Prompt 协议]]
 
-## 主要 Action
+## 关键源码
 
-- `create_node`：创建子节点。
-- `mark_complete`：完成当前节点并写入结构化 handoff。
-- `execute_command`：执行 shell 命令，结果进入 artifact。
-- `read_file` / `write_file` / `append_to_file` / `list_dir` / `search`：文件工具，受 sandbox 限制。
-- `read_artifact`：按行读取 artifact 片段。
-- `request_human_input`：暂停或同步请求人类输入。
-- `append_sibling_node`：在当前节点后追加同级节点。
-- `query_memory`：通过受限 query type 查询 SQLite memory。
+- [parser.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/parser.go:1)：Action/Response DTO 和 parser validation。
+- [api.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/api.go:1)：DeepSeek/OpenAI-compatible API 请求封装和系统 prompt。
+- [engine.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/engine.go:1)：LLM engine 接口。
+- [async.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/async.go:1)：异步 engine 包装。
+- [prompts/system.md](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/prompts/system.md:1)：嵌入式系统 prompt 文档。
 
+## 协议边界
+
+模型输出必须是一个 JSON object，顶层包含 `actions` 数组。parser 负责把常见 Markdown code fence 清理掉，再执行字段级校验。runtime 仍会再次进行 authority check 和 action-specific 执行校验。

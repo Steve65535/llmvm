@@ -5,26 +5,19 @@
 ## `Engine`
 
 - 源码：[pkg/llm/engine.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/engine.go:3)
-- 形状：`Call(prompt string) (*Output, error)` 与 `CallAsync(prompt string) <-chan *Output`。
-- 作用：抽象同步和异步 LLM 调用。runtime 只依赖这个接口。
+- 签名：`type Engine interface { Call(prompt string) (string, error) }`
+- 作用：隔离 runtime 与具体模型 provider。runtime 只依赖 `Call`。
 
-## `NewLLMEngine() (*APIEngine, error)`
+## `CallLLM(prompt string) (string, error)`
 
-- 源码：[pkg/llm/api.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/api.go:61)
-- 返回：配置好的 `APIEngine`。
-- 作用：读取环境变量并创建真实模型适配器。
-- 失败场景：缺少 API key 或配置不完整时返回错误；CLI 会退回 `StubEngine`。
+- 源码：[pkg/llm/api.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/api.go:38)
+- 参数：
+  - `prompt`: `string`，runtime 构造的完整 prompt。
+- 返回：`string, error`，模型原始文本输出。
+- 副作用：读取 `DEEPSEEK_API_KEY`，向 API endpoint 发起 HTTP 请求。
 
-## `APIEngine.Call(prompt string) (*Output, error)`
+## `AsyncEngine.Call(prompt string) (string, error)`
 
-- 源码：[pkg/llm/api.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/api.go:80)
-- 参数：runtime 构造出的完整 prompt。
-- 返回：模型输出文本和错误。
-- 副作用：发起 HTTP 请求；调用 `logLLMConversation` 记录输入、输出和 token usage。
-- 关键约束：系统 prompt 要求模型只返回单个合法 JSON object，且不得使用 Markdown code fence。
-
-## `StubEngine.Call(prompt string) (*Output, error)`
-
-- 源码：[pkg/llm/sub.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/sub.go:11)
-- 作用：在无真实 API 时返回固定或简单的测试响应，方便本地启动和单元测试。
-
+- 源码：[pkg/llm/async.go](/Users/steve/Desktop/llmvm-rag-exp/pkg/llm/async.go:15)
+- 作用：把底层 engine 调用包在 goroutine/channel 中。
+- 注意：runtime 当前的 node turn timeout 主要在 `pkg/runtime/execute.go` 层实现。

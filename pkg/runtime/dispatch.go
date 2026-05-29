@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Steve65535/llmvm/pkg/llm"
+	resolverPkg "github.com/Steve65535/llmvm/pkg/resolver"
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 )
 
@@ -81,10 +82,10 @@ func (r *Runtime) actionCreateNode(action llm.Action, parent *tasknode.TaskNode)
 	return nil
 }
 
-// actionMarkComplete 处理 mark_complete：验收 → 落 handoff 字段 → SQLite + 异步向量索引。
+// actionMarkComplete 处理 mark_complete：验收 → 落 handoff 字段 → 设 Status=Completed → SQLite + 异步向量索引。
 //
 // 校验顺序很重要：必须先跑 acceptance（包括 testable 的 shell 命令），missing 时直接拒绝。
-// 拒绝时 SingleFinished 不会被设置，cursor 也不会推进，节点保持当前 turn。
+// 拒绝时 Status 不变，cursor 也不会推进，节点保持当前 turn。
 func (r *Runtime) actionMarkComplete(action llm.Action, parent *tasknode.TaskNode) error {
 	if len(action.AcceptanceResults) > 0 {
 		r.applyAcceptanceResults(parent, action.AcceptanceResults)
@@ -95,7 +96,7 @@ func (r *Runtime) actionMarkComplete(action llm.Action, parent *tasknode.TaskNod
 			strings.Join(missing, ", "))
 	}
 
-	parent.SingleFinished = true
+	parent.Status = tasknode.Completed
 
 	if action.Summary != "" {
 		parent.Result = action.Summary
@@ -218,26 +219,51 @@ func (r *Runtime) actionUpdateVariables(action llm.Action, parent *tasknode.Task
 
 func (r *Runtime) actionExecuteCommand(action llm.Action, parent *tasknode.TaskNode) error {
 	fmt.Printf("💻 Executing command: %s\n", action.Command)
-	result, err := r.HandleCLI(action.Command)
-	if err != nil {
-		return fmt.Errorf("command execution failed: %w", err)
+	result, cmdErr := r.HandleCLI(action.Command)
+
+	// exit≠0 是 observation，不是 infrastructure error。
+	// 全量输出（含 stderr）落 artifact，失败信息进 history，让模型在下一轮看到并决策。
+	// 只有 HandleCLI 完全无法执行（空命令、进程启动失败）才返回 error。
+	exitFailed := cmdErr != nil
+
+	if exitFailed {
+		fmt.Printf("⚠️  Command exited with error: %v\n", cmdErr)
+	} else {
+		fmt.Printf("📝 Command result: %s\n", result)
 	}
-	fmt.Printf("📝 Command result: %s\n", result)
+
 	if parent.Variables == nil {
 		parent.Variables = make(map[string]interface{})
 	}
-	art := r.artifacts.Add("command", action.Command, result, parent.ID)
+
+	// 全量内容落 artifact + FTS，不截断（exit≠0 时 result 含 stderr）
+	artType := "command"
+	if exitFailed {
+		artType = "command_failed"
+	}
+	art := r.artifacts.Add(artType, action.Command, result, parent.ID)
 	parent.Variables["last_command"] = art.ID
-	if r.memStore != nil {
-		_ = r.memStore.UpsertArtifact(art.ID, parent.ID, art.Type, art.Source, art.Summary, art.SpillPath, art.Pinned)
-		_ = r.memStore.IndexArtifactFTS(art.ID, art.Source, art.Summary, result)
+	r.indexArtifactFull(art, result)
+
+	// 决定进入 command_output_history 的摘要：超过阈值时走 ArtifactGetter mini-loop。
+	goal := parent.Goal
+	if goal == "" && len(parent.Information) > 0 {
+		goal = parent.Information[0]
+	}
+	histSummary := result
+	if summary := r.summarizeLargeArtifact(art.ID, len(result), goal, parent.AcceptanceCriteria, exitFailed); summary != "" {
+		histSummary = summary
+	}
+	if len(histSummary) > MaxHistoryEntryLength*4 {
+		histSummary = histSummary[:MaxHistoryEntryLength*4] + "\n... [TRUNCATED]"
 	}
 
-	// 保留 command history 用于 agentic loop 上下文
-	if len(result) > MaxHistoryEntryLength {
-		result = result[:MaxHistoryEntryLength] + "\n... [TRUNCATED]"
+	// exit≠0 时在 history 里明确标注失败，让模型知道这是一次失败的观察
+	exitTag := ""
+	if exitFailed {
+		exitTag = " [EXIT FAILED]"
 	}
-	histEntry := fmt.Sprintf("[%s] $ %s\n> %s", time.Now().Format("15:04:05"), action.Command, result)
+	histEntry := fmt.Sprintf("[%s]%s $ %s\n> %s", time.Now().Format("15:04:05"), exitTag, action.Command, histSummary)
 	var history []string
 	if existing, ok := parent.Variables["command_output_history"]; ok {
 		if casted, ok := existing.([]string); ok {
@@ -255,7 +281,20 @@ func (r *Runtime) actionExecuteCommand(action llm.Action, parent *tasknode.TaskN
 		history = history[len(history)-10:]
 	}
 	parent.Variables["command_output_history"] = history
+
+	// observation 语义：exit≠0 不是 action 失败，返回 nil 让模型继续决策
 	return nil
+}
+
+// formatResolvedSpans 把 resolver 返回的 evidence spans 格式化为 history 摘要。
+func formatResolvedSpans(artifactID string, spans []resolverPkg.EvidenceSpan) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[artifact=%s resolved %d span(s)]\n", artifactID, len(spans))
+	for _, ev := range spans {
+		fmt.Fprintf(&sb, "lines %d-%d (score=%.2f %s):\n%s\n",
+			ev.StartLine, ev.EndLine, ev.Score, ev.Rationale, ev.Text)
+	}
+	return sb.String()
 }
 
 func (r *Runtime) actionAppendToFile(action llm.Action, parent *tasknode.TaskNode) error {
@@ -303,11 +342,18 @@ func (r *Runtime) actionReadFile(action llm.Action, parent *tasknode.TaskNode) e
 	}
 	art := r.artifacts.Add("file_read", safePath, string(data), parent.ID)
 	parent.Variables["last_read"] = art.ID
-	if r.memStore != nil {
-		_ = r.memStore.UpsertArtifact(art.ID, parent.ID, art.Type, art.Source, art.Summary, art.SpillPath, art.Pinned)
-		_ = r.memStore.IndexArtifactFTS(art.ID, art.Source, art.Summary, string(data))
-	}
+	r.indexArtifactFull(art, string(data))
 	fmt.Printf("📖 read_file: %s → %s (%d bytes)\n", safePath, art.ID, len(data))
+
+	// 超长时用 ArtifactGetter 精确提取，写进 _artifact_view 让模型当轮可见
+	goal := parent.Goal
+	if goal == "" && len(parent.Information) > 0 {
+		goal = parent.Information[0]
+	}
+	if summary := r.summarizeLargeArtifact(art.ID, len(data), goal, parent.AcceptanceCriteria, false); summary != "" {
+		parent.Variables["_artifact_view"] = summary
+		fmt.Printf("  🔍 read_file: ArtifactGetter summary written to _artifact_view\n")
+	}
 	return nil
 }
 
@@ -382,11 +428,18 @@ func (r *Runtime) actionSearch(action llm.Action, parent *tasknode.TaskNode) err
 	source := fmt.Sprintf("%s@%s", action.Content, safePath)
 	art := r.artifacts.Add("search", source, result, parent.ID)
 	parent.Variables["last_search"] = art.ID
-	if r.memStore != nil {
-		_ = r.memStore.UpsertArtifact(art.ID, parent.ID, art.Type, art.Source, art.Summary, art.SpillPath, art.Pinned)
-		_ = r.memStore.IndexArtifactFTS(art.ID, art.Source, art.Summary, result)
-	}
+	r.indexArtifactFull(art, result)
 	fmt.Printf("🔍 search: pattern=%q in %s → %s\n", action.Content, safePath, art.ID)
+
+	// 超长时用 ArtifactGetter 精确提取，写进 _artifact_view
+	goal := parent.Goal
+	if goal == "" && len(parent.Information) > 0 {
+		goal = parent.Information[0]
+	}
+	if summary := r.summarizeLargeArtifact(art.ID, len(result), goal, parent.AcceptanceCriteria, false); summary != "" {
+		parent.Variables["_artifact_view"] = summary
+		fmt.Printf("  🔍 search: ArtifactGetter summary written to _artifact_view\n")
+	}
 	return nil
 }
 
@@ -403,6 +456,20 @@ func (r *Runtime) actionReadArtifact(action llm.Action, parent *tasknode.TaskNod
 	if parent.Variables == nil {
 		parent.Variables = make(map[string]interface{})
 	}
+
+	// 超长时用 ArtifactGetter 精确提取，替代裸截断
+	goal := parent.Goal
+	if goal == "" && len(parent.Information) > 0 {
+		goal = parent.Information[0]
+	}
+	if summary := r.summarizeLargeArtifact(action.ArtifactID, len(slice), goal, parent.AcceptanceCriteria, false); summary != "" {
+		parent.Variables["_artifact_view"] = summary
+		fmt.Printf("📎 read_artifact: %s lines %d-%d → ArtifactGetter summary (%d chars)\n",
+			action.ArtifactID, startLine, endLine, len(summary))
+		return nil
+	}
+
+	// 未超阈值或无 goal：原有逻辑（硬截断兜底）
 	if len(slice) > r.budget.MaxCommandResultChars {
 		slice = slice[:r.budget.MaxCommandResultChars] + fmt.Sprintf("\n... [TRUNCATED: showing %d of more chars]", r.budget.MaxCommandResultChars)
 	}

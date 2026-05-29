@@ -279,6 +279,11 @@ request_human_input
 
 ## 架构
 
+![LLMVM Architecture](docs/architecture.png)
+
+<details>
+<summary>Mermaid 源码</summary>
+
 ```mermaid
 graph TD
     User["用户任务"] --> CLI["CLI"]
@@ -303,6 +308,8 @@ graph TD
     Runtime --> Save["SaveState JSON"]
     Runtime --> Human["Human Interrupt"]
 ```
+
+</details>
 
 ## 项目结构
 

@@ -123,7 +123,7 @@ func (r *Runtime) syncNodeToMemory(node *tasknode.TaskNode) {
 		nodeTypeStr(node.Type), nodeStatusStr(node.Status),
 		info, depth, node.Index,
 	)
-	if node.WetherFinished || node.SingleFinished {
+	if node.WetherFinished || node.Status == tasknode.Completed {
 		confidence := node.Confidence
 		if confidence == "" && node.WetherFinished {
 			confidence = "auto_generated"
@@ -165,7 +165,7 @@ func (r *Runtime) RebuildIndexFromAST() error {
 		if len(n.Information) > 0 {
 			info = n.Information[0]
 		}
-		hasHandoff := n.WetherFinished || n.SingleFinished
+		hasHandoff := n.WetherFinished || n.Status == tasknode.Completed
 		confidence := n.Confidence
 		if confidence == "" && hasHandoff {
 			confidence = "auto_generated"

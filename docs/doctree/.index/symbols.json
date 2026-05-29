@@ -1,22 +1,22 @@
 {
   "root": "/Users/steve/Desktop/llmvm-rag-exp",
-  "count": 195,
+  "count": 321,
   "items": [
     {
-      "name": "main",
-      "params": "",
-      "returns": "{",
-      "file": "cmd/main.go",
-      "line": 29,
-      "signature": "func main() {",
+      "name": "installEmergencySaveHandler",
+      "params": "savePath string, root *tasknode.TaskNode, getArts func(",
+      "returns": "*artifact.Store) {",
+      "file": "cmd/signals.go",
+      "line": 19,
+      "signature": "func installEmergencySaveHandler(savePath string, root *tasknode.TaskNode, getArts func() *artifact.Store) {",
       "language_hint": "go"
     },
     {
       "name": "printTree",
       "params": "node *tasknode.TaskNode, indent int",
       "returns": "{",
-      "file": "cmd/main.go",
-      "line": 199,
+      "file": "cmd/tree.go",
+      "line": 12,
       "signature": "func printTree(node *tasknode.TaskNode, indent int) {",
       "language_hint": "go"
     },
@@ -24,8 +24,8 @@
       "name": "findWaitingHumanNodes",
       "params": "node *tasknode.TaskNode",
       "returns": "[]string {",
-      "file": "cmd/main.go",
-      "line": 240,
+      "file": "cmd/human.go",
+      "line": 16,
       "signature": "func findWaitingHumanNodes(node *tasknode.TaskNode) []string {",
       "language_hint": "go"
     },
@@ -33,9 +33,90 @@
       "name": "promptHumanResponse",
       "params": "nodeID string",
       "returns": "*tasknode.HumanResponse {",
-      "file": "cmd/main.go",
-      "line": 252,
+      "file": "cmd/human.go",
+      "line": 30,
       "signature": "func promptHumanResponse(nodeID string) *tasknode.HumanResponse {",
+      "language_hint": "go"
+    },
+    {
+      "name": "initEngine",
+      "params": "",
+      "returns": "llm.Engine {",
+      "file": "cmd/engine.go",
+      "line": 12,
+      "signature": "func initEngine() llm.Engine {",
+      "language_hint": "go"
+    },
+    {
+      "name": "persistState",
+      "params": "path string, root *tasknode.TaskNode, arts *artifact.Store",
+      "returns": "{",
+      "file": "cmd/state.go",
+      "line": 25,
+      "signature": "func persistState(path string, root *tasknode.TaskNode, arts *artifact.Store) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "loadState",
+      "params": "path string",
+      "returns": "(*tasknode.TaskNode, *artifact.Store, string) {",
+      "file": "cmd/state.go",
+      "line": 34,
+      "signature": "func loadState(path string) (*tasknode.TaskNode, *artifact.Store, string) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "derivedSQLitePath",
+      "params": "savePath, loadPath string",
+      "returns": "string {",
+      "file": "cmd/state.go",
+      "line": 67,
+      "signature": "func derivedSQLitePath(savePath, loadPath string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "main",
+      "params": "",
+      "returns": "{",
+      "file": "cmd/main.go",
+      "line": 26,
+      "signature": "func main() {",
+      "language_hint": "go"
+    },
+    {
+      "name": "obtainRoot",
+      "params": "loadPath string",
+      "returns": "(*tasknode.TaskNode, *artifact.Store, string) {",
+      "file": "cmd/main.go",
+      "line": 86,
+      "signature": "func obtainRoot(loadPath string) (*tasknode.TaskNode, *artifact.Store, string) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "readCommandFromArgs",
+      "params": "",
+      "returns": "string {",
+      "file": "cmd/main.go",
+      "line": 103,
+      "signature": "func readCommandFromArgs() string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "handleResume",
+      "params": "rt *runtime.Runtime, root *tasknode.TaskNode, resumeNode, loadPath string",
+      "returns": "bool {",
+      "file": "cmd/main.go",
+      "line": 135,
+      "signature": "func handleResume(rt *runtime.Runtime, root *tasknode.TaskNode, resumeNode, loadPath string) bool {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestParserSmoke",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "test/sandbox/parser_smoke_test.go",
+      "line": 17,
+      "signature": "func TestParserSmoke(t *testing.T) {",
       "language_hint": "go"
     },
     {
@@ -79,7 +160,7 @@
       "params": "node",
       "returns": null,
       "file": "visualizer/frontend/src/App.jsx",
-      "line": 46,
+      "line": 47,
       "signature": "const renderNode = (node) => {",
       "language_hint": "jsx"
     },
@@ -88,7 +169,7 @@
       "params": "",
       "returns": null,
       "file": "visualizer/frontend/src/App.jsx",
-      "line": 91,
+      "line": 99,
       "signature": "const renderTooltip = () => {",
       "language_hint": "jsx"
     },
@@ -97,7 +178,7 @@
       "params": "",
       "returns": null,
       "file": "visualizer/frontend/src/App.jsx",
-      "line": 145,
+      "line": 172,
       "signature": "const renderArtifactPanel = () => {",
       "language_hint": "jsx"
     },
@@ -219,6 +300,33 @@
       "language_hint": "go"
     },
     {
+      "name": "LoadPrompt",
+      "params": "name string",
+      "returns": "string {",
+      "file": "pkg/llm/prompts.go",
+      "line": 16,
+      "signature": "func LoadPrompt(name string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "AvailablePrompts",
+      "params": "",
+      "returns": "([]string, error) {",
+      "file": "pkg/llm/prompts.go",
+      "line": 25,
+      "signature": "func AvailablePrompts() ([]string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "SystemPrompt",
+      "params": "",
+      "returns": "string {",
+      "file": "pkg/llm/prompts.go",
+      "line": 40,
+      "signature": "func SystemPrompt() string {",
+      "language_hint": "go"
+    },
+    {
       "name": "TestParseResponse",
       "params": "t *testing.T",
       "returns": "{",
@@ -228,11 +336,20 @@
       "language_hint": "go"
     },
     {
-      "name": "TestParseResponseError",
+      "name": "TestParseResponseRejectsLoop",
       "params": "t *testing.T",
       "returns": "{",
       "file": "pkg/llm/parser_test.go",
       "line": 47,
+      "signature": "func TestParseResponseRejectsLoop(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestParseResponseError",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_test.go",
+      "line": 54,
       "signature": "func TestParseResponseError(t *testing.T) {",
       "language_hint": "go"
     },
@@ -309,6 +426,123 @@
       "language_hint": "go"
     },
     {
+      "name": "TestAddArtifactRequiresName",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 10,
+      "signature": "func TestAddArtifactRequiresName(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestAddArtifactRequiresContent",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 18,
+      "signature": "func TestAddArtifactRequiresContent(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestAddArtifactRejectsInvalidScope",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 26,
+      "signature": "func TestAddArtifactRejectsInvalidScope(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestAddArtifactValidPayload",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 34,
+      "signature": "func TestAddArtifactValidPayload(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestModifyArtifactRequiresSupersedes",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 59,
+      "signature": "func TestModifyArtifactRequiresSupersedes(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestCreateNodeAcceptanceCriteriaTestableNeedsCommand",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 69,
+      "signature": "func TestCreateNodeAcceptanceCriteriaTestableNeedsCommand(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestCreateNodeAcceptanceCriteriaInvalidCheckType",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 85,
+      "signature": "func TestCreateNodeAcceptanceCriteriaInvalidCheckType(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestCreateNodeAcceptanceCriteriaValidPayload",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 101,
+      "signature": "func TestCreateNodeAcceptanceCriteriaValidPayload(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestMarkCompleteAcceptanceResultsRequireCriterionID",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 128,
+      "signature": "func TestMarkCompleteAcceptanceResultsRequireCriterionID(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestRequestContextRequiresNeeds",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 142,
+      "signature": "func TestRequestContextRequiresNeeds(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestRequestContextNeedRequiresKindAndQuery",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 150,
+      "signature": "func TestRequestContextNeedRequiresKindAndQuery(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestCreateNodeRejectsLoopType",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 174,
+      "signature": "func TestCreateNodeRejectsLoopType(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestAppendSiblingRejectsLoopType",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/llm/parser_phase_test.go",
+      "line": 182,
+      "signature": "func TestAppendSiblingRejectsLoopType(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
       "name": "Call",
       "params": "prompt string",
       "returns": "(*Output, error) {",
@@ -322,7 +556,7 @@
       "params": "prompt string",
       "returns": "<-chan *Output {",
       "file": "pkg/llm/sub.go",
-      "line": 54,
+      "line": 44,
       "signature": "func (s *StubEngine) CallAsync(prompt string) <-chan *Output {",
       "language_hint": "go"
     },
@@ -367,7 +601,7 @@
       "params": "prompt string",
       "returns": "(*Output, error) {",
       "file": "pkg/llm/api.go",
-      "line": 80,
+      "line": 83,
       "signature": "func (e *APIEngine) Call(prompt string) (*Output, error) {",
       "language_hint": "go"
     },
@@ -376,7 +610,7 @@
       "params": "input, output string, usage Usage",
       "returns": "{",
       "file": "pkg/llm/api.go",
-      "line": 243,
+      "line": 135,
       "signature": "func logLLMConversation(input, output string, usage Usage) {",
       "language_hint": "go"
     },
@@ -385,7 +619,7 @@
       "params": "prompt string",
       "returns": "<-chan *Output {",
       "file": "pkg/llm/api.go",
-      "line": 272,
+      "line": 161,
       "signature": "func (e *APIEngine) CallAsync(prompt string) <-chan *Output {",
       "language_hint": "go"
     },
@@ -394,7 +628,7 @@
       "params": "jsonStr string",
       "returns": "(*Response, error) {",
       "file": "pkg/llm/parser.go",
-      "line": 103,
+      "line": 156,
       "signature": "func ParseResponse(jsonStr string) (*Response, error) {",
       "language_hint": "go"
     },
@@ -403,7 +637,7 @@
       "params": "str string",
       "returns": "string {",
       "file": "pkg/llm/parser.go",
-      "line": 196,
+      "line": 309,
       "signature": "func CleanJSONString(str string) string {",
       "language_hint": "go"
     },
@@ -412,7 +646,7 @@
       "params": "",
       "returns": "*tasknode.TaskNode {",
       "file": "pkg/llm/parser.go",
-      "line": 210,
+      "line": 323,
       "signature": "func (n *NodeDTO) ToTaskNode() *tasknode.TaskNode {",
       "language_hint": "go"
     },
@@ -475,7 +709,7 @@
       "params": "id, parentID, name, typ, status, information string, depth, traversalIndex int",
       "returns": "error {",
       "file": "pkg/memory/memory.go",
-      "line": 125,
+      "line": 182,
       "signature": "func (s *Store) UpsertNode(id, parentID, name, typ, status, information string, depth, traversalIndex int) error {",
       "language_hint": "go"
     },
@@ -484,7 +718,7 @@
       "params": "nodeID, scopeNodeID, name, valueRef, valueSummary string",
       "returns": "error {",
       "file": "pkg/memory/memory.go",
-      "line": 182,
+      "line": 239,
       "signature": "func (s *Store) UpsertScopedVariable(nodeID, scopeNodeID, name, valueRef, valueSummary string) error {",
       "language_hint": "go"
     },
@@ -493,8 +727,26 @@
       "params": "id, producerNodeID, kind, title, summary, contentRef string, pinned bool",
       "returns": "error {",
       "file": "pkg/memory/memory.go",
-      "line": 200,
+      "line": 257,
       "signature": "func (s *Store) UpsertArtifact(id, producerNodeID, kind, title, summary, contentRef string, pinned bool) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "UpsertArtifactFull",
+      "params": "row ArtifactRow",
+      "returns": "error {",
+      "file": "pkg/memory/memory.go",
+      "line": 297,
+      "signature": "func (s *Store) UpsertArtifactFull(row ArtifactRow) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "MarkArtifactSuperseded",
+      "params": "oldID, newID string",
+      "returns": "error {",
+      "file": "pkg/memory/memory.go",
+      "line": 331,
+      "signature": "func (s *Store) MarkArtifactSuperseded(oldID, newID string) error {",
       "language_hint": "go"
     },
     {
@@ -502,7 +754,7 @@
       "params": "id string, pinned bool",
       "returns": "error {",
       "file": "pkg/memory/memory.go",
-      "line": 220,
+      "line": 339,
       "signature": "func (s *Store) UpdateArtifactPinned(id string, pinned bool) error {",
       "language_hint": "go"
     },
@@ -511,7 +763,7 @@
       "params": "artifactID, title, summary, content string",
       "returns": "error {",
       "file": "pkg/memory/memory.go",
-      "line": 232,
+      "line": 351,
       "signature": "func (s *Store) IndexArtifactFTS(artifactID, title, summary, content string) error {",
       "language_hint": "go"
     },
@@ -520,7 +772,7 @@
       "params": "nodeID string",
       "returns": "([]NodeBrief, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 289,
+      "line": 416,
       "signature": "func (s *Store) QueryAncestorChain(nodeID string) ([]NodeBrief, error) {",
       "language_hint": "go"
     },
@@ -529,7 +781,7 @@
       "params": "parentID string, excludeNodeID string, statuses []string, limit int",
       "returns": "([]HandoffBrief, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 319,
+      "line": 446,
       "signature": "func (s *Store) QuerySiblingHandoffs(parentID string, excludeNodeID string, statuses []string, limit int) ([]HandoffBrief, error) {",
       "language_hint": "go"
     },
@@ -538,7 +790,7 @@
       "params": "limit int",
       "returns": "([]ArtifactBrief, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 371,
+      "line": 498,
       "signature": "func (s *Store) QueryPinnedArtifacts(limit int) ([]ArtifactBrief, error) {",
       "language_hint": "go"
     },
@@ -547,7 +799,7 @@
       "params": "limit int",
       "returns": "([]ArtifactBrief, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 387,
+      "line": 517,
       "signature": "func (s *Store) QueryRecentArtifacts(limit int) ([]ArtifactBrief, error) {",
       "language_hint": "go"
     },
@@ -556,7 +808,7 @@
       "params": "nodeID string",
       "returns": "([]ArtifactBrief, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 403,
+      "line": 537,
       "signature": "func (s *Store) QueryArtifactsByNode(nodeID string) ([]ArtifactBrief, error) {",
       "language_hint": "go"
     },
@@ -565,8 +817,17 @@
       "params": "query string, limit int",
       "returns": "([]ArtifactBrief, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 419,
+      "line": 556,
       "signature": "func (s *Store) SearchArtifactsFTS(query string, limit int) ([]ArtifactBrief, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "QueryArtifactsByScopeTag",
+      "params": "scope, granularity, importance, tagFilter string, limit int",
+      "returns": "([]ArtifactBrief, error) {",
+      "file": "pkg/memory/memory.go",
+      "line": 579,
+      "signature": "func (s *Store) QueryArtifactsByScopeTag(scope, granularity, importance, tagFilter string, limit int) ([]ArtifactBrief, error) {",
       "language_hint": "go"
     },
     {
@@ -574,7 +835,7 @@
       "params": "nodeIDs []string",
       "returns": "([]ScopedVariable, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 438,
+      "line": 620,
       "signature": "func (s *Store) QueryScopedVariables(nodeIDs []string) ([]ScopedVariable, error) {",
       "language_hint": "go"
     },
@@ -583,7 +844,7 @@
       "params": "input RebuildInput",
       "returns": "error {",
       "file": "pkg/memory/memory.go",
-      "line": 518,
+      "line": 709,
       "signature": "func (s *Store) Rebuild(input RebuildInput) error {",
       "language_hint": "go"
     },
@@ -592,7 +853,7 @@
       "params": "rows *sql.Rows",
       "returns": "([]ArtifactBrief, error) {",
       "file": "pkg/memory/memory.go",
-      "line": 589,
+      "line": 793,
       "signature": "func scanArtifactBriefs(rows *sql.Rows) ([]ArtifactBrief, error) {",
       "language_hint": "go"
     },
@@ -601,7 +862,7 @@
       "params": "s string, out *[]string",
       "returns": "{",
       "file": "pkg/memory/memory.go",
-      "line": 603,
+      "line": 813,
       "signature": "func parseJSONSlice(s string, out *[]string) {",
       "language_hint": "go"
     },
@@ -610,8 +871,53 @@
       "params": "a, b int",
       "returns": "int {",
       "file": "pkg/memory/memory.go",
-      "line": 610,
+      "line": 820,
       "signature": "func min(a, b int) int {",
+      "language_hint": "go"
+    },
+    {
+      "name": "UpsertAcceptanceCriterion",
+      "params": "c AcceptanceCriterion",
+      "returns": "error {",
+      "file": "pkg/memory/memory.go",
+      "line": 851,
+      "signature": "func (s *Store) UpsertAcceptanceCriterion(c AcceptanceCriterion) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "QueryAcceptanceCriteria",
+      "params": "nodeID string",
+      "returns": "([]AcceptanceCriterion, error) {",
+      "file": "pkg/memory/memory.go",
+      "line": 874,
+      "signature": "func (s *Store) QueryAcceptanceCriteria(nodeID string) ([]AcceptanceCriterion, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "InsertAcceptanceResult",
+      "params": "r AcceptanceResult",
+      "returns": "error {",
+      "file": "pkg/memory/memory.go",
+      "line": 901,
+      "signature": "func (s *Store) InsertAcceptanceResult(r AcceptanceResult) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "QueryAcceptanceResults",
+      "params": "nodeID string",
+      "returns": "([]AcceptanceResult, error) {",
+      "file": "pkg/memory/memory.go",
+      "line": 918,
+      "signature": "func (s *Store) QueryAcceptanceResults(nodeID string) ([]AcceptanceResult, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "LogRetrievalEvent",
+      "params": "e RetrievalEvent, rerank []RerankEntry",
+      "returns": "(int64, error) {",
+      "file": "pkg/memory/memory.go",
+      "line": 965,
+      "signature": "func (s *Store) LogRetrievalEvent(e RetrievalEvent, rerank []RerankEntry) (int64, error) {",
       "language_hint": "go"
     },
     {
@@ -691,7 +997,7 @@
       "params": "",
       "returns": "bool {",
       "file": "pkg/cursor/cursor.go",
-      "line": 23,
+      "line": 22,
       "signature": "func (c *Cursor) Done() bool {",
       "language_hint": "go"
     },
@@ -700,7 +1006,7 @@
       "params": "",
       "returns": "bool {",
       "file": "pkg/cursor/cursor.go",
-      "line": 28,
+      "line": 27,
       "signature": "func (c *Cursor) MoveDown() bool {",
       "language_hint": "go"
     },
@@ -709,7 +1015,7 @@
       "params": "",
       "returns": "bool {",
       "file": "pkg/cursor/cursor.go",
-      "line": 48,
+      "line": 40,
       "signature": "func (c *Cursor) MoveFirstUnfinishedChild() bool {",
       "language_hint": "go"
     },
@@ -718,35 +1024,8 @@
       "params": "",
       "returns": "bool {",
       "file": "pkg/cursor/cursor.go",
-      "line": 69,
+      "line": 54,
       "signature": "func (c *Cursor) MoveUp() bool {",
-      "language_hint": "go"
-    },
-    {
-      "name": "PopLoop",
-      "params": "node *tasknode.TaskNode",
-      "returns": "{",
-      "file": "pkg/cursor/cursor.go",
-      "line": 85,
-      "signature": "func (c *Cursor) PopLoop(node *tasknode.TaskNode) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "GetCurrentLoop",
-      "params": "",
-      "returns": "*tasknode.TaskNode {",
-      "file": "pkg/cursor/cursor.go",
-      "line": 92,
-      "signature": "func (c *Cursor) GetCurrentLoop() *tasknode.TaskNode {",
-      "language_hint": "go"
-    },
-    {
-      "name": "IsInLoop",
-      "params": "",
-      "returns": "bool {",
-      "file": "pkg/cursor/cursor.go",
-      "line": 100,
-      "signature": "func (c *Cursor) IsInLoop() bool {",
       "language_hint": "go"
     },
     {
@@ -754,7 +1033,7 @@
       "params": "",
       "returns": "[]string {",
       "file": "pkg/cursor/cursor.go",
-      "line": 105,
+      "line": 64,
       "signature": "func (c *Cursor) GetPath() []string {",
       "language_hint": "go"
     },
@@ -763,26 +1042,98 @@
       "params": "",
       "returns": "*tasknode.TaskNode {",
       "file": "pkg/cursor/cursor.go",
-      "line": 120,
+      "line": 78,
       "signature": "func (c *Cursor) GetRoot() *tasknode.TaskNode {",
       "language_hint": "go"
     },
     {
-      "name": "newBudgetConfig",
-      "params": "totalTokens int",
-      "returns": "BudgetConfig {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 41,
-      "signature": "func newBudgetConfig(totalTokens int) BudgetConfig {",
+      "name": "IndexArtifactAsync",
+      "params": "art *artifact.Artifact, content string",
+      "returns": "{",
+      "file": "pkg/runtime/index.go",
+      "line": 19,
+      "signature": "func (r *Runtime) IndexArtifactAsync(art *artifact.Artifact, content string) {",
       "language_hint": "go"
     },
     {
-      "name": "loadContextBudget",
+      "name": "artifactVectorMeta",
+      "params": "art *artifact.Artifact",
+      "returns": "map[string]string {",
+      "file": "pkg/runtime/index.go",
+      "line": 35,
+      "signature": "func artifactVectorMeta(art *artifact.Artifact) map[string]string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "IndexNodeArtifactsAsync",
+      "params": "node *tasknode.TaskNode",
+      "returns": "{",
+      "file": "pkg/runtime/index.go",
+      "line": 58,
+      "signature": "func (r *Runtime) IndexNodeArtifactsAsync(node *tasknode.TaskNode) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "WaitForBackgroundIndexing",
       "params": "",
-      "returns": "int {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 56,
-      "signature": "func loadContextBudget() int {",
+      "returns": "{",
+      "file": "pkg/runtime/index.go",
+      "line": 96,
+      "signature": "func (r *Runtime) WaitForBackgroundIndexing() {",
+      "language_hint": "go"
+    },
+    {
+      "name": "syncNodeToMemory",
+      "params": "node *tasknode.TaskNode",
+      "returns": "{",
+      "file": "pkg/runtime/index.go",
+      "line": 103,
+      "signature": "func (r *Runtime) syncNodeToMemory(node *tasknode.TaskNode) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "RebuildIndexFromAST",
+      "params": "",
+      "returns": "error {",
+      "file": "pkg/runtime/index.go",
+      "line": 143,
+      "signature": "func (r *Runtime) RebuildIndexFromAST() error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Call",
+      "params": "prompt string",
+      "returns": "(*llm.Output, error) {",
+      "file": "pkg/runtime/e2e_test.go",
+      "line": 26,
+      "signature": "func (s *scriptedEngine) Call(prompt string) (*llm.Output, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "CallAsync",
+      "params": "prompt string",
+      "returns": "<-chan *llm.Output {",
+      "file": "pkg/runtime/e2e_test.go",
+      "line": 38,
+      "signature": "func (s *scriptedEngine) CallAsync(prompt string) <-chan *llm.Output {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestEndToEndAddArtifactAndAcceptance",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/runtime/e2e_test.go",
+      "line": 52,
+      "signature": "func TestEndToEndAddArtifactAndAcceptance(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestEndToEndMarkCompleteRejectedWithoutAcceptance",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/runtime/e2e_test.go",
+      "line": 181,
+      "signature": "func TestEndToEndMarkCompleteRejectedWithoutAcceptance(t *testing.T) {",
       "language_hint": "go"
     },
     {
@@ -790,287 +1141,8 @@
       "params": "engine llm.Engine, root *tasknode.TaskNode, dbPath ...string",
       "returns": "*Runtime {",
       "file": "pkg/runtime/runtime.go",
-      "line": 93,
+      "line": 84,
       "signature": "func NewRuntime(engine llm.Engine, root *tasknode.TaskNode, dbPath ...string) *Runtime {",
-      "language_hint": "go"
-    },
-    {
-      "name": "Execute",
-      "params": "initialRequest string",
-      "returns": "error {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 123,
-      "signature": "func (r *Runtime) Execute(initialRequest string) error {",
-      "language_hint": "go"
-    },
-    {
-      "name": "buildPrompt",
-      "params": "current *tasknode.TaskNode, request string, retryError error",
-      "returns": "(string, error) {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 367,
-      "signature": "func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryError error) (string, error) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "buildPromptWithGlobalContext",
-      "params": "current *tasknode.TaskNode, request string, globalContext string, retryError error",
-      "returns": "(string, error) {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 372,
-      "signature": "func (r *Runtime) buildPromptWithGlobalContext(current *tasknode.TaskNode, request string, globalContext string, retryError error) (string, error) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "buildPromptWithWorkspace",
-      "params": "current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error",
-      "returns": "(string, error) {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 377,
-      "signature": "func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error) (string, error) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "buildGlobalContext",
-      "params": "current *tasknode.TaskNode",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 386,
-      "signature": "func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "getRelevantTreeIndex",
-      "params": "current *tasknode.TaskNode, budget int",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 394,
-      "signature": "func (r *Runtime) getRelevantTreeIndex(current *tasknode.TaskNode, budget int) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "buildFilteredIndex",
-      "params": "node *tasknode.TaskNode, indent int, ancestors, siblings, recent map[string]bool, sb *strings.Builder, omitted *int, budget int",
-      "returns": "{",
-      "file": "pkg/runtime/runtime.go",
-      "line": 451,
-      "signature": "func (r *Runtime) buildFilteredIndex(node *tasknode.TaskNode, indent int, ancestors, siblings, recent map[string]bool, sb *strings.Builder, omitted *int, budget int) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "collectSiblingHandoffs",
-      "params": "current *tasknode.TaskNode",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 471,
-      "signature": "func (r *Runtime) collectSiblingHandoffs(current *tasknode.TaskNode) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "RebuildIndexFromAST",
-      "params": "",
-      "returns": "error {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 486,
-      "signature": "func (r *Runtime) RebuildIndexFromAST() error {",
-      "language_hint": "go"
-    },
-    {
-      "name": "syncNodeToMemory",
-      "params": "node *tasknode.TaskNode",
-      "returns": "{",
-      "file": "pkg/runtime/runtime.go",
-      "line": 556,
-      "signature": "func (r *Runtime) syncNodeToMemory(node *tasknode.TaskNode) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "getTreeIndex",
-      "params": "node *tasknode.TaskNode, indent int",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 595,
-      "signature": "func (r *Runtime) getTreeIndex(node *tasknode.TaskNode, indent int) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "formatTreeIndexLine",
-      "params": "node *tasknode.TaskNode, indent int",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 604,
-      "signature": "func (r *Runtime) formatTreeIndexLine(node *tasknode.TaskNode, indent int) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "selectAttentionNodes",
-      "params": "current *tasknode.TaskNode, request string",
-      "returns": "([]string, error) {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 626,
-      "signature": "func (r *Runtime) selectAttentionNodes(current *tasknode.TaskNode, request string) ([]string, error) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "FormatGlobalWorkspace",
-      "params": "nodeIDs []string",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 631,
-      "signature": "func (r *Runtime) FormatGlobalWorkspace(nodeIDs []string) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "findNodeByID",
-      "params": "root *tasknode.TaskNode, id string",
-      "returns": "*tasknode.TaskNode {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 673,
-      "signature": "func (r *Runtime) findNodeByID(root *tasknode.TaskNode, id string) *tasknode.TaskNode {",
-      "language_hint": "go"
-    },
-    {
-      "name": "buildPromptInternalV2",
-      "params": "current *tasknode.TaskNode, request string, globalContext string, retryError error",
-      "returns": "(string, error) {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 686,
-      "signature": "func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request string, globalContext string, retryError error) (string, error) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "getChildrenInfo",
-      "params": "node *tasknode.TaskNode",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1027,
-      "signature": "func (r *Runtime) getChildrenInfo(node *tasknode.TaskNode) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "formatPath",
-      "params": "path []string",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1097,
-      "signature": "func formatPath(path []string) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "nodeToState",
-      "params": "node *tasknode.TaskNode",
-      "returns": "llm.NodeState {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1112,
-      "signature": "func (r *Runtime) nodeToState(node *tasknode.TaskNode) llm.NodeState {",
-      "language_hint": "go"
-    },
-    {
-      "name": "CollectScopedVariables",
-      "params": "current *tasknode.TaskNode",
-      "returns": "map[string]interface{} {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1184,
-      "signature": "func (r *Runtime) CollectScopedVariables(current *tasknode.TaskNode) map[string]interface{} {",
-      "language_hint": "go"
-    },
-    {
-      "name": "formatVariables",
-      "params": "vars map[string]interface{}, maxLen int",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1202,
-      "signature": "func formatVariables(vars map[string]interface{}, maxLen int) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "ExecuteAction",
-      "params": "action llm.Action, parent *tasknode.TaskNode",
-      "returns": "error {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1248,
-      "signature": "func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) error {",
-      "language_hint": "go"
-    },
-    {
-      "name": "collectGlobalAttention",
-      "params": "node *tasknode.TaskNode",
-      "returns": "[]NodeResult {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1597,
-      "signature": "func (r *Runtime) collectGlobalAttention(node *tasknode.TaskNode) []NodeResult {",
-      "language_hint": "go"
-    },
-    {
-      "name": "FormatHistory",
-      "params": "",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1615,
-      "signature": "func (r *Runtime) FormatHistory() string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "HandleCLI",
-      "params": "command string",
-      "returns": "(string, error) {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1683,
-      "signature": "func (r *Runtime) HandleCLI(command string) (string, error) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "EstimateTokenCount",
-      "params": "text string",
-      "returns": "int {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1723,
-      "signature": "func EstimateTokenCount(text string) int {",
-      "language_hint": "go"
-    },
-    {
-      "name": "printTokenStats",
-      "params": "prompt string, contextLimit int",
-      "returns": "{",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1742,
-      "signature": "func (r *Runtime) printTokenStats(prompt string, contextLimit int) {",
-      "language_hint": "go"
-    },
-    {
-      "name": "nodeTypeStr",
-      "params": "t tasknode.TaskType",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1760,
-      "signature": "func nodeTypeStr(t tasknode.TaskType) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "nodeStatusStr",
-      "params": "s tasknode.TaskStatus",
-      "returns": "string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1771,
-      "signature": "func nodeStatusStr(s tasknode.TaskStatus) string {",
-      "language_hint": "go"
-    },
-    {
-      "name": "decideNextStep",
-      "params": "current *tasknode.TaskNode",
-      "returns": "error {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1791,
-      "signature": "func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {",
-      "language_hint": "go"
-    },
-    {
-      "name": "handleError",
-      "params": "node *tasknode.TaskNode, err error",
-      "returns": "bool {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1889,
-      "signature": "func (r *Runtime) handleError(node *tasknode.TaskNode, err error) bool {",
       "language_hint": "go"
     },
     {
@@ -1078,7 +1150,7 @@
       "params": "",
       "returns": "*tasknode.TaskNode {",
       "file": "pkg/runtime/runtime.go",
-      "line": 1924,
+      "line": 137,
       "signature": "func (r *Runtime) GetCurrentNode() *tasknode.TaskNode {",
       "language_hint": "go"
     },
@@ -1087,7 +1159,7 @@
       "params": "",
       "returns": "*artifact.Store {",
       "file": "pkg/runtime/runtime.go",
-      "line": 1929,
+      "line": 142,
       "signature": "func (r *Runtime) GetArtifacts() *artifact.Store {",
       "language_hint": "go"
     },
@@ -1096,25 +1168,52 @@
       "params": "store *artifact.Store",
       "returns": "{",
       "file": "pkg/runtime/runtime.go",
-      "line": 1934,
+      "line": 147,
       "signature": "func (r *Runtime) SetArtifacts(store *artifact.Store) {",
       "language_hint": "go"
     },
     {
-      "name": "hasUnfinishedChildren",
-      "params": "node *tasknode.TaskNode",
-      "returns": "bool {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1938,
-      "signature": "func (r *Runtime) hasUnfinishedChildren(node *tasknode.TaskNode) bool {",
+      "name": "EstimateTokenCount",
+      "params": "text string",
+      "returns": "int {",
+      "file": "pkg/runtime/tokens.go",
+      "line": 14,
+      "signature": "func EstimateTokenCount(text string) int {",
+      "language_hint": "go"
+    },
+    {
+      "name": "printTokenStats",
+      "params": "prompt string, contextLimit int",
+      "returns": "{",
+      "file": "pkg/runtime/tokens.go",
+      "line": 26,
+      "signature": "func (r *Runtime) printTokenStats(prompt string, contextLimit int) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "nodeTypeStr",
+      "params": "t tasknode.TaskType",
+      "returns": "string {",
+      "file": "pkg/runtime/tokens.go",
+      "line": 46,
+      "signature": "func nodeTypeStr(t tasknode.TaskType) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "nodeStatusStr",
+      "params": "s tasknode.TaskStatus",
+      "returns": "string {",
+      "file": "pkg/runtime/tokens.go",
+      "line": 56,
+      "signature": "func nodeStatusStr(s tasknode.TaskStatus) string {",
       "language_hint": "go"
     },
     {
       "name": "isContextOverflow",
       "params": "err error",
       "returns": "bool {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1948,
+      "file": "pkg/runtime/tokens.go",
+      "line": 72,
       "signature": "func isContextOverflow(err error) bool {",
       "language_hint": "go"
     },
@@ -1122,8 +1221,8 @@
       "name": "applyCompression",
       "params": "vars map[string]interface{}, level int",
       "returns": "{",
-      "file": "pkg/runtime/runtime.go",
-      "line": 1966,
+      "file": "pkg/runtime/tokens.go",
+      "line": 91,
       "signature": "func applyCompression(vars map[string]interface{}, level int) {",
       "language_hint": "go"
     },
@@ -1131,18 +1230,18 @@
       "name": "generateOperationLog",
       "params": "node *tasknode.TaskNode",
       "returns": "[]string {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 2000,
+      "file": "pkg/runtime/tokens.go",
+      "line": 124,
       "signature": "func (r *Runtime) generateOperationLog(node *tasknode.TaskNode) []string {",
       "language_hint": "go"
     },
     {
-      "name": "sandboxPath",
-      "params": "filePath string",
-      "returns": "(string, error) {",
-      "file": "pkg/runtime/runtime.go",
-      "line": 2015,
-      "signature": "func sandboxPath(filePath string) (string, error) {",
+      "name": "contextWithTimeout",
+      "params": "d time.Duration",
+      "returns": "(context.Context, context.CancelFunc) {",
+      "file": "pkg/runtime/actions.go",
+      "line": 22,
+      "signature": "func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {",
       "language_hint": "go"
     },
     {
@@ -1150,7 +1249,7 @@
       "params": "action llm.Action, node *tasknode.TaskNode",
       "returns": "error {",
       "file": "pkg/runtime/actions.go",
-      "line": 27,
+      "line": 37,
       "signature": "func (r *Runtime) handleRequestHumanInput(action llm.Action, node *tasknode.TaskNode) error {",
       "language_hint": "go"
     },
@@ -1159,7 +1258,7 @@
       "params": "node *tasknode.TaskNode, resp *tasknode.HumanResponse",
       "returns": "{",
       "file": "pkg/runtime/actions.go",
-      "line": 73,
+      "line": 83,
       "signature": "func (r *Runtime) applyHumanResponse(node *tasknode.TaskNode, resp *tasknode.HumanResponse) {",
       "language_hint": "go"
     },
@@ -1168,7 +1267,7 @@
       "params": "nodeID string, resp *tasknode.HumanResponse",
       "returns": "error {",
       "file": "pkg/runtime/actions.go",
-      "line": 99,
+      "line": 109,
       "signature": "func (r *Runtime) ResumeWithHumanResponse(nodeID string, resp *tasknode.HumanResponse) error {",
       "language_hint": "go"
     },
@@ -1177,7 +1276,7 @@
       "params": "req *tasknode.HumanRequest",
       "returns": "(*tasknode.HumanResponse, error) {",
       "file": "pkg/runtime/actions.go",
-      "line": 121,
+      "line": 131,
       "signature": "func readHumanInputFromStdin(req *tasknode.HumanRequest) (*tasknode.HumanResponse, error) {",
       "language_hint": "go"
     },
@@ -1186,7 +1285,7 @@
       "params": "action llm.Action, current *tasknode.TaskNode",
       "returns": "error {",
       "file": "pkg/runtime/actions.go",
-      "line": 164,
+      "line": 174,
       "signature": "func (r *Runtime) handleAppendSiblingNode(action llm.Action, current *tasknode.TaskNode) error {",
       "language_hint": "go"
     },
@@ -1195,8 +1294,287 @@
       "params": "action llm.Action, node *tasknode.TaskNode",
       "returns": "error {",
       "file": "pkg/runtime/actions.go",
-      "line": 177,
+      "line": 188,
       "signature": "func (r *Runtime) handleQueryMemory(action llm.Action, node *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "missingRequiredAcceptance",
+      "params": "node *tasknode.TaskNode",
+      "returns": "[]string {",
+      "file": "pkg/runtime/actions.go",
+      "line": 274,
+      "signature": "func (r *Runtime) missingRequiredAcceptance(node *tasknode.TaskNode) []string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "runTestableCheck",
+      "params": "node *tasknode.TaskNode, c tasknode.AcceptanceCriterion",
+      "returns": "(bool, string, error) {",
+      "file": "pkg/runtime/actions.go",
+      "line": 295,
+      "signature": "func (r *Runtime) runTestableCheck(node *tasknode.TaskNode, c tasknode.AcceptanceCriterion) (bool, string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "applyAcceptanceResults",
+      "params": "node *tasknode.TaskNode, results []llm.AcceptanceResultDTO",
+      "returns": "[]string {",
+      "file": "pkg/runtime/actions.go",
+      "line": 340,
+      "signature": "func (r *Runtime) applyAcceptanceResults(node *tasknode.TaskNode, results []llm.AcceptanceResultDTO) []string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "persistAcceptanceCriteria",
+      "params": "node *tasknode.TaskNode",
+      "returns": "{",
+      "file": "pkg/runtime/actions.go",
+      "line": 405,
+      "signature": "func (r *Runtime) persistAcceptanceCriteria(node *tasknode.TaskNode) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "inheritAcceptanceCriteria",
+      "params": "node *tasknode.TaskNode",
+      "returns": "{",
+      "file": "pkg/runtime/actions.go",
+      "line": 425,
+      "signature": "func (r *Runtime) inheritAcceptanceCriteria(node *tasknode.TaskNode) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "handleAddArtifact",
+      "params": "action llm.Action, node *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/actions.go",
+      "line": 455,
+      "signature": "func (r *Runtime) handleAddArtifact(action llm.Action, node *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "handleModifyArtifact",
+      "params": "action llm.Action, node *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/actions.go",
+      "line": 494,
+      "signature": "func (r *Runtime) handleModifyArtifact(action llm.Action, node *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "indexArtifactFull",
+      "params": "art *artifact.Artifact, contentForFTS string",
+      "returns": "{",
+      "file": "pkg/runtime/actions.go",
+      "line": 551,
+      "signature": "func (r *Runtime) indexArtifactFull(art *artifact.Artifact, contentForFTS string) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "handleRequestContext",
+      "params": "action llm.Action, node *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/actions.go",
+      "line": 585,
+      "signature": "func (r *Runtime) handleRequestContext(action llm.Action, node *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "formatRetrievalResult",
+      "params": "res retrieval.Result",
+      "returns": "string {",
+      "file": "pkg/runtime/actions.go",
+      "line": 666,
+      "signature": "func formatRetrievalResult(res retrieval.Result) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "HandleCLI",
+      "params": "command string",
+      "returns": "(string, error) {",
+      "file": "pkg/runtime/shell.go",
+      "line": 15,
+      "signature": "func (r *Runtime) HandleCLI(command string) (string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "sandboxPath",
+      "params": "filePath string",
+      "returns": "(string, error) {",
+      "file": "pkg/runtime/shell.go",
+      "line": 53,
+      "signature": "func sandboxPath(filePath string) (string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Execute",
+      "params": "initialRequest string",
+      "returns": "error {",
+      "file": "pkg/runtime/execute.go",
+      "line": 28,
+      "signature": "func (r *Runtime) Execute(initialRequest string) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "decideNextStep",
+      "params": "current *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/execute.go",
+      "line": 146,
+      "signature": "func (r *Runtime) decideNextStep(current *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "handleError",
+      "params": "node *tasknode.TaskNode, err error",
+      "returns": "bool {",
+      "file": "pkg/runtime/execute.go",
+      "line": 180,
+      "signature": "func (r *Runtime) handleError(node *tasknode.TaskNode, err error) bool {",
+      "language_hint": "go"
+    },
+    {
+      "name": "hasUnfinishedChildren",
+      "params": "node *tasknode.TaskNode",
+      "returns": "bool {",
+      "file": "pkg/runtime/execute.go",
+      "line": 213,
+      "signature": "func (r *Runtime) hasUnfinishedChildren(node *tasknode.TaskNode) bool {",
+      "language_hint": "go"
+    },
+    {
+      "name": "ExecuteAction",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 23,
+      "signature": "func (r *Runtime) ExecuteAction(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionCreateNode",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 71,
+      "signature": "func (r *Runtime) actionCreateNode(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionMarkComplete",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 89,
+      "signature": "func (r *Runtime) actionMarkComplete(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionUpdateVariables",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 176,
+      "signature": "func (r *Runtime) actionUpdateVariables(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionExecuteCommand",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 220,
+      "signature": "func (r *Runtime) actionExecuteCommand(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "formatResolvedSpans",
+      "params": "artifactID string, spans []resolverPkg.EvidenceSpan",
+      "returns": "string {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 290,
+      "signature": "func formatResolvedSpans(artifactID string, spans []resolverPkg.EvidenceSpan) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionAppendToFile",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 300,
+      "signature": "func (r *Runtime) actionAppendToFile(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionReadFile",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 331,
+      "signature": "func (r *Runtime) actionReadFile(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionWriteFile",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 360,
+      "signature": "func (r *Runtime) actionWriteFile(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionListDir",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 376,
+      "signature": "func (r *Runtime) actionListDir(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionSearch",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 406,
+      "signature": "func (r *Runtime) actionSearch(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "actionReadArtifact",
+      "params": "action llm.Action, parent *tasknode.TaskNode",
+      "returns": "error {",
+      "file": "pkg/runtime/dispatch.go",
+      "line": 446,
+      "signature": "func (r *Runtime) actionReadArtifact(action llm.Action, parent *tasknode.TaskNode) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "envInt",
+      "params": "fallback int, keys ...string",
+      "returns": "int {",
+      "file": "pkg/runtime/budget.go",
+      "line": 34,
+      "signature": "func envInt(fallback int, keys ...string) int {",
+      "language_hint": "go"
+    },
+    {
+      "name": "newBudgetConfig",
+      "params": "",
+      "returns": "BudgetConfig {",
+      "file": "pkg/runtime/budget.go",
+      "line": 46,
+      "signature": "func newBudgetConfig() BudgetConfig {",
+      "language_hint": "go"
+    },
+    {
+      "name": "loadContextBudget",
+      "params": "",
+      "returns": "int {",
+      "file": "pkg/runtime/budget.go",
+      "line": 64,
+      "signature": "func loadContextBudget() int {",
       "language_hint": "go"
     },
     {
@@ -1213,8 +1591,53 @@
       "params": "node *tasknode.TaskNode",
       "returns": "{",
       "file": "pkg/runtime/agentic_loop.go",
-      "line": 64,
+      "line": 67,
       "signature": "func (r *Runtime) clearLeafScratchpad(node *tasknode.TaskNode) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestPositionRoleRoot",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/runtime/position_test.go",
+      "line": 10,
+      "signature": "func TestPositionRoleRoot(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestPositionRoleExecutorCannotCreateChild",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/runtime/position_test.go",
+      "line": 25,
+      "signature": "func TestPositionRoleExecutorCannotCreateChild(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestPositionRolePlannerNormal",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/runtime/position_test.go",
+      "line": 46,
+      "signature": "func TestPositionRolePlannerNormal(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestPositionConstraintsIncludeRequiredAcceptance",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/runtime/position_test.go",
+      "line": 64,
+      "signature": "func TestPositionConstraintsIncludeRequiredAcceptance(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "contains",
+      "params": "s, sub string",
+      "returns": "bool {",
+      "file": "pkg/runtime/position_test.go",
+      "line": 85,
+      "signature": "func contains(s, sub string) bool {",
       "language_hint": "go"
     },
     {
@@ -1308,11 +1731,83 @@
       "language_hint": "go"
     },
     {
+      "name": "BuildPosition",
+      "params": "node *tasknode.TaskNode",
+      "returns": "Position {",
+      "file": "pkg/runtime/position.go",
+      "line": 66,
+      "signature": "func BuildPosition(node *tasknode.TaskNode) Position {",
+      "language_hint": "go"
+    },
+    {
+      "name": "isErrorHandlerOf",
+      "params": "node *tasknode.TaskNode",
+      "returns": "bool {",
+      "file": "pkg/runtime/position.go",
+      "line": 114,
+      "signature": "func isErrorHandlerOf(node *tasknode.TaskNode) bool {",
+      "language_hint": "go"
+    },
+    {
+      "name": "authorityFor",
+      "params": "role PositionRole",
+      "returns": "AuthorityDescriptor {",
+      "file": "pkg/runtime/position.go",
+      "line": 127,
+      "signature": "func authorityFor(role PositionRole) AuthorityDescriptor {",
+      "language_hint": "go"
+    },
+    {
+      "name": "scopeFor",
+      "params": "role PositionRole",
+      "returns": "ScopeDescriptor {",
+      "file": "pkg/runtime/position.go",
+      "line": 185,
+      "signature": "func scopeFor(role PositionRole) ScopeDescriptor {",
+      "language_hint": "go"
+    },
+    {
+      "name": "constraintsFor",
+      "params": "node *tasknode.TaskNode, role PositionRole",
+      "returns": "[]string {",
+      "file": "pkg/runtime/position.go",
+      "line": 223,
+      "signature": "func constraintsFor(node *tasknode.TaskNode, role PositionRole) []string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "FormatPositionSummary",
+      "params": "pos Position",
+      "returns": "string {",
+      "file": "pkg/runtime/position.go",
+      "line": 246,
+      "signature": "func FormatPositionSummary(pos Position) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "FormatAllowedActions",
+      "params": "pos Position",
+      "returns": "string {",
+      "file": "pkg/runtime/position.go",
+      "line": 265,
+      "signature": "func FormatAllowedActions(pos Position) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "CheckAuthority",
+      "params": "pos Position, actionType string",
+      "returns": "error {",
+      "file": "pkg/runtime/position.go",
+      "line": 304,
+      "signature": "func CheckAuthority(pos Position, actionType string) error {",
+      "language_hint": "go"
+    },
+    {
       "name": "buildNodeActivation",
       "params": "current *tasknode.TaskNode",
       "returns": "NodeActivation {",
       "file": "pkg/runtime/activation.go",
-      "line": 35,
+      "line": 39,
       "signature": "func (r *Runtime) buildNodeActivation(current *tasknode.TaskNode) NodeActivation {",
       "language_hint": "go"
     },
@@ -1321,7 +1816,7 @@
       "params": "current *tasknode.TaskNode",
       "returns": "[]NodeBrief {",
       "file": "pkg/runtime/activation.go",
-      "line": 69,
+      "line": 73,
       "signature": "func (r *Runtime) buildHierarchyPath(current *tasknode.TaskNode) []NodeBrief {",
       "language_hint": "go"
     },
@@ -1330,7 +1825,7 @@
       "params": "current *tasknode.TaskNode",
       "returns": "[]memory.HandoffBrief {",
       "file": "pkg/runtime/activation.go",
-      "line": 112,
+      "line": 116,
       "signature": "func (r *Runtime) buildSiblingHandoffs(current *tasknode.TaskNode) []memory.HandoffBrief {",
       "language_hint": "go"
     },
@@ -1339,7 +1834,7 @@
       "params": "",
       "returns": "[]memory.ArtifactBrief {",
       "file": "pkg/runtime/activation.go",
-      "line": 166,
+      "line": 170,
       "signature": "func (r *Runtime) buildArtifactIndex() []memory.ArtifactBrief {",
       "language_hint": "go"
     },
@@ -1348,7 +1843,7 @@
       "params": "act NodeActivation, current *tasknode.TaskNode",
       "returns": "string {",
       "file": "pkg/runtime/activation.go",
-      "line": 221,
+      "line": 228,
       "signature": "func (r *Runtime) formatActivationContext(act NodeActivation, current *tasknode.TaskNode) string {",
       "language_hint": "go"
     },
@@ -1357,7 +1852,7 @@
       "params": "handoffs []memory.HandoffBrief",
       "returns": "string {",
       "file": "pkg/runtime/activation.go",
-      "line": 270,
+      "line": 275,
       "signature": "func formatSiblingHandoffs(handoffs []memory.HandoffBrief) string {",
       "language_hint": "go"
     },
@@ -1366,7 +1861,7 @@
       "params": "briefs []memory.ArtifactBrief, maxChars int",
       "returns": "string {",
       "file": "pkg/runtime/activation.go",
-      "line": 301,
+      "line": 306,
       "signature": "func formatArtifactBriefs(briefs []memory.ArtifactBrief, maxChars int) string {",
       "language_hint": "go"
     },
@@ -1375,8 +1870,341 @@
       "params": "info []string",
       "returns": "string {",
       "file": "pkg/runtime/activation.go",
-      "line": 322,
+      "line": 327,
       "signature": "func firstInfo(info []string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "BuildContextPack",
+      "params": "current *tasknode.TaskNode, pos Position",
+      "returns": "ContextPack {",
+      "file": "pkg/runtime/activation.go",
+      "line": 364,
+      "signature": "func (r *Runtime) BuildContextPack(current *tasknode.TaskNode, pos Position) ContextPack {",
+      "language_hint": "go"
+    },
+    {
+      "name": "formatContextPack",
+      "params": "p ContextPack",
+      "returns": "string {",
+      "file": "pkg/runtime/activation.go",
+      "line": 443,
+      "signature": "func formatContextPack(p ContextPack) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "LoadPrompt",
+      "params": "name string",
+      "returns": "string {",
+      "file": "pkg/runtime/prompt_template.go",
+      "line": 16,
+      "signature": "func LoadPrompt(name string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "AvailablePrompts",
+      "params": "",
+      "returns": "([]string, error) {",
+      "file": "pkg/runtime/prompt_template.go",
+      "line": 25,
+      "signature": "func AvailablePrompts() ([]string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "buildGlobalContext",
+      "params": "current *tasknode.TaskNode",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 15,
+      "signature": "func (r *Runtime) buildGlobalContext(current *tasknode.TaskNode) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "getRelevantTreeIndex",
+      "params": "current *tasknode.TaskNode, budget int",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 25,
+      "signature": "func (r *Runtime) getRelevantTreeIndex(current *tasknode.TaskNode, budget int) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "buildFilteredIndex",
+      "params": "node *tasknode.TaskNode, indent int, ancestors, siblings, recent map[string]bool, sb *strings.Builder, omitted *int, budget int",
+      "returns": "{",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 78,
+      "signature": "func (r *Runtime) buildFilteredIndex(node *tasknode.TaskNode, indent int, ancestors, siblings, recent map[string]bool, sb *strings.Builder, omitted *int, budget int) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "getTreeIndex",
+      "params": "node *tasknode.TaskNode, indent int",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 98,
+      "signature": "func (r *Runtime) getTreeIndex(node *tasknode.TaskNode, indent int) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "formatTreeIndexLine",
+      "params": "node *tasknode.TaskNode, indent int",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 107,
+      "signature": "func (r *Runtime) formatTreeIndexLine(node *tasknode.TaskNode, indent int) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "collectSiblingHandoffs",
+      "params": "current *tasknode.TaskNode",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 129,
+      "signature": "func (r *Runtime) collectSiblingHandoffs(current *tasknode.TaskNode) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "selectAttentionNodes",
+      "params": "current *tasknode.TaskNode, request string",
+      "returns": "([]string, error) {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 154,
+      "signature": "func (r *Runtime) selectAttentionNodes(current *tasknode.TaskNode, request string) ([]string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "FormatGlobalWorkspace",
+      "params": "nodeIDs []string",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 159,
+      "signature": "func (r *Runtime) FormatGlobalWorkspace(nodeIDs []string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "findNodeByID",
+      "params": "root *tasknode.TaskNode, id string",
+      "returns": "*tasknode.TaskNode {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 200,
+      "signature": "func (r *Runtime) findNodeByID(root *tasknode.TaskNode, id string) *tasknode.TaskNode {",
+      "language_hint": "go"
+    },
+    {
+      "name": "collectGlobalAttention",
+      "params": "node *tasknode.TaskNode",
+      "returns": "[]NodeResult {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 214,
+      "signature": "func (r *Runtime) collectGlobalAttention(node *tasknode.TaskNode) []NodeResult {",
+      "language_hint": "go"
+    },
+    {
+      "name": "FormatHistory",
+      "params": "",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 232,
+      "signature": "func (r *Runtime) FormatHistory() string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "CollectScopedVariables",
+      "params": "current *tasknode.TaskNode",
+      "returns": "map[string]interface{} {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 294,
+      "signature": "func (r *Runtime) CollectScopedVariables(current *tasknode.TaskNode) map[string]interface{} {",
+      "language_hint": "go"
+    },
+    {
+      "name": "formatVariables",
+      "params": "vars map[string]interface{}, maxLen int",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 312,
+      "signature": "func formatVariables(vars map[string]interface{}, maxLen int) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "formatPath",
+      "params": "path []string",
+      "returns": "string {",
+      "file": "pkg/runtime/context_assembly.go",
+      "line": 352,
+      "signature": "func formatPath(path []string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "parseGetterTool",
+      "params": "raw string",
+      "returns": "(*getterTool, error) {",
+      "file": "pkg/runtime/artifact_getter.go",
+      "line": 223,
+      "signature": "func parseGetterTool(raw string) (*getterTool, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "searchInArtifact",
+      "params": "r *Runtime, artifactID, keyword string",
+      "returns": "string {",
+      "file": "pkg/runtime/artifact_getter.go",
+      "line": 244,
+      "signature": "func searchInArtifact(r *Runtime, artifactID, keyword string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "getterFallback",
+      "params": "artifactID, goal string",
+      "returns": "string {",
+      "file": "pkg/runtime/artifact_getter.go",
+      "line": 299,
+      "signature": "func (r *Runtime) getterFallback(artifactID, goal string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "buildPrompt",
+      "params": "current *tasknode.TaskNode, request string, retryError error",
+      "returns": "(string, error) {",
+      "file": "pkg/runtime/prompt.go",
+      "line": 13,
+      "signature": "func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryError error) (string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "buildPromptWithGlobalContext",
+      "params": "current *tasknode.TaskNode, request string, globalContext string, retryError error",
+      "returns": "(string, error) {",
+      "file": "pkg/runtime/prompt.go",
+      "line": 18,
+      "signature": "func (r *Runtime) buildPromptWithGlobalContext(current *tasknode.TaskNode, request string, globalContext string, retryError error) (string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "buildPromptWithWorkspace",
+      "params": "current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error",
+      "returns": "(string, error) {",
+      "file": "pkg/runtime/prompt.go",
+      "line": 23,
+      "signature": "func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error) (string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "buildPromptInternalV2",
+      "params": "current *tasknode.TaskNode, request string, globalContext string, retryError error",
+      "returns": "(string, error) {",
+      "file": "pkg/runtime/prompt.go",
+      "line": 43,
+      "signature": "func (r *Runtime) buildPromptInternalV2(current *tasknode.TaskNode, request string, globalContext string, retryError error) (string, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "getChildrenInfo",
+      "params": "node *tasknode.TaskNode",
+      "returns": "string {",
+      "file": "pkg/runtime/prompt.go",
+      "line": 176,
+      "signature": "func (r *Runtime) getChildrenInfo(node *tasknode.TaskNode) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "nodeToState",
+      "params": "node *tasknode.TaskNode",
+      "returns": "llm.NodeState {",
+      "file": "pkg/runtime/prompt.go",
+      "line": 241,
+      "signature": "func (r *Runtime) nodeToState(node *tasknode.TaskNode) llm.NodeState {",
+      "language_hint": "go"
+    },
+    {
+      "name": "formatAcceptanceCriteria",
+      "params": "node *tasknode.TaskNode",
+      "returns": "string {",
+      "file": "pkg/runtime/prompt.go",
+      "line": 311,
+      "signature": "func formatAcceptanceCriteria(node *tasknode.TaskNode) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "NewService",
+      "params": "mem *memory.Store, vec *vector.Store",
+      "returns": "*Service {",
+      "file": "pkg/retrieval/retrieval.go",
+      "line": 70,
+      "signature": "func NewService(mem *memory.Store, vec *vector.Store) *Service {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Query",
+      "params": "ctx context.Context, q Query",
+      "returns": "(Result, error) {",
+      "file": "pkg/retrieval/retrieval.go",
+      "line": 75,
+      "signature": "func (s *Service) Query(ctx context.Context, q Query) (Result, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "computeFinalScore",
+      "params": "it RetrievedItem, q Query, now time.Time",
+      "returns": "float64 {",
+      "file": "pkg/retrieval/retrieval.go",
+      "line": 223,
+      "signature": "func computeFinalScore(it RetrievedItem, q Query, now time.Time) float64 {",
+      "language_hint": "go"
+    },
+    {
+      "name": "ensureItem",
+      "params": "pool map[string]*RetrievedItem, b memory.ArtifactBrief",
+      "returns": "*RetrievedItem {",
+      "file": "pkg/retrieval/retrieval.go",
+      "line": 274,
+      "signature": "func ensureItem(pool map[string]*RetrievedItem, b memory.ArtifactBrief) *RetrievedItem {",
+      "language_hint": "go"
+    },
+    {
+      "name": "sanitizeFTS",
+      "params": "text string",
+      "returns": "string {",
+      "file": "pkg/retrieval/retrieval.go",
+      "line": 285,
+      "signature": "func sanitizeFTS(text string) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "truncate",
+      "params": "s string, n int",
+      "returns": "string {",
+      "file": "pkg/retrieval/retrieval.go",
+      "line": 303,
+      "signature": "func truncate(s string, n int) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "now",
+      "params": "",
+      "returns": "time.Time {",
+      "file": "pkg/retrieval/retrieval.go",
+      "line": 310,
+      "signature": "func (s *Service) now() time.Time {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestHybridRetrievalRanksRelevantHigher",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/retrieval/retrieval_test.go",
+      "line": 14,
+      "signature": "func TestHybridRetrievalRanksRelevantHigher(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestRetrievalDegradesGracefullyWithoutVector",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/retrieval/retrieval_test.go",
+      "line": 90,
+      "signature": "func TestRetrievalDegradesGracefullyWithoutVector(t *testing.T) {",
       "language_hint": "go"
     },
     {
@@ -1456,7 +2284,7 @@
       "params": "",
       "returns": "*Store {",
       "file": "pkg/artifact/store.go",
-      "line": 50,
+      "line": 83,
       "signature": "func New() *Store {",
       "language_hint": "go"
     },
@@ -1465,7 +2293,7 @@
       "params": "",
       "returns": "([]byte, error) {",
       "file": "pkg/artifact/store.go",
-      "line": 64,
+      "line": 97,
       "signature": "func (s *Store) MarshalJSON() ([]byte, error) {",
       "language_hint": "go"
     },
@@ -1474,7 +2302,7 @@
       "params": "data []byte",
       "returns": "error {",
       "file": "pkg/artifact/store.go",
-      "line": 74,
+      "line": 107,
       "signature": "func (s *Store) UnmarshalJSON(data []byte) error {",
       "language_hint": "go"
     },
@@ -1483,8 +2311,26 @@
       "params": "typ, source, content, createdBy string",
       "returns": "*Artifact {",
       "file": "pkg/artifact/store.go",
-      "line": 101,
+      "line": 152,
       "signature": "func (s *Store) Add(typ, source, content, createdBy string) *Artifact {",
+      "language_hint": "go"
+    },
+    {
+      "name": "AddStructured",
+      "params": "req AddRequest",
+      "returns": "*Artifact {",
+      "file": "pkg/artifact/store.go",
+      "line": 164,
+      "signature": "func (s *Store) AddStructured(req AddRequest) *Artifact {",
+      "language_hint": "go"
+    },
+    {
+      "name": "estimateTokens",
+      "params": "text string",
+      "returns": "int {",
+      "file": "pkg/artifact/store.go",
+      "line": 254,
+      "signature": "func estimateTokens(text string) int {",
       "language_hint": "go"
     },
     {
@@ -1492,7 +2338,7 @@
       "params": "id string",
       "returns": "*Artifact {",
       "file": "pkg/artifact/store.go",
-      "line": 157,
+      "line": 266,
       "signature": "func (s *Store) Get(id string) *Artifact {",
       "language_hint": "go"
     },
@@ -1501,7 +2347,7 @@
       "params": "id string",
       "returns": "{",
       "file": "pkg/artifact/store.go",
-      "line": 164,
+      "line": 273,
       "signature": "func (s *Store) Pin(id string) {",
       "language_hint": "go"
     },
@@ -1510,7 +2356,7 @@
       "params": "id string, startLine, endLine int",
       "returns": "(string, error) {",
       "file": "pkg/artifact/store.go",
-      "line": 174,
+      "line": 283,
       "signature": "func (s *Store) ReadSlice(id string, startLine, endLine int) (string, error) {",
       "language_hint": "go"
     },
@@ -1519,7 +2365,7 @@
       "params": "nodeID string",
       "returns": "[]*Artifact {",
       "file": "pkg/artifact/store.go",
-      "line": 211,
+      "line": 320,
       "signature": "func (s *Store) ListByNode(nodeID string) []*Artifact {",
       "language_hint": "go"
     },
@@ -1528,7 +2374,7 @@
       "params": "",
       "returns": "[]*Artifact {",
       "file": "pkg/artifact/store.go",
-      "line": 225,
+      "line": 334,
       "signature": "func (s *Store) ListAll() []*Artifact {",
       "language_hint": "go"
     },
@@ -1537,7 +2383,7 @@
       "params": "maxEntries int, maxChars int",
       "returns": "string {",
       "file": "pkg/artifact/store.go",
-      "line": 235,
+      "line": 344,
       "signature": "func (s *Store) Index(maxEntries int, maxChars int) string {",
       "language_hint": "go"
     },
@@ -1546,7 +2392,7 @@
       "params": "art *Artifact",
       "returns": "(string, error) {",
       "file": "pkg/artifact/store.go",
-      "line": 271,
+      "line": 380,
       "signature": "func (s *Store) loadContent(art *Artifact) (string, error) {",
       "language_hint": "go"
     },
@@ -1555,7 +2401,7 @@
       "params": "",
       "returns": "{",
       "file": "pkg/artifact/store.go",
-      "line": 286,
+      "line": 395,
       "signature": "func (s *Store) evictIfNeeded() {",
       "language_hint": "go"
     },
@@ -1564,7 +2410,7 @@
       "params": "",
       "returns": "int {",
       "file": "pkg/artifact/store.go",
-      "line": 308,
+      "line": 417,
       "signature": "func (s *Store) activeCount() int {",
       "language_hint": "go"
     },
@@ -1573,8 +2419,287 @@
       "params": "typ, source, content string, totalLines, originalLen int",
       "returns": "string {",
       "file": "pkg/artifact/store.go",
-      "line": 319,
+      "line": 428,
       "signature": "func generateSummary(typ, source, content string, totalLines, originalLen int) string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "NewHashingEmbedder",
+      "params": "dim int",
+      "returns": "*HashingEmbedder {",
+      "file": "pkg/vector/vector.go",
+      "line": 47,
+      "signature": "func NewHashingEmbedder(dim int) *HashingEmbedder {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Dim",
+      "params": "",
+      "returns": "int     { return e.dim }",
+      "file": "pkg/vector/vector.go",
+      "line": 54,
+      "signature": "func (e *HashingEmbedder) Dim() int     { return e.dim }",
+      "language_hint": "go"
+    },
+    {
+      "name": "Name",
+      "params": "",
+      "returns": "string { return \"hashing-trigram\" }",
+      "file": "pkg/vector/vector.go",
+      "line": 55,
+      "signature": "func (e *HashingEmbedder) Name() string { return \"hashing-trigram\" }",
+      "language_hint": "go"
+    },
+    {
+      "name": "Embed",
+      "params": "_ context.Context, text string",
+      "returns": "([]float32, error) {",
+      "file": "pkg/vector/vector.go",
+      "line": 57,
+      "signature": "func (e *HashingEmbedder) Embed(_ context.Context, text string) ([]float32, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "bumpHash",
+      "params": "vec []float32, key string, delta float32",
+      "returns": "{",
+      "file": "pkg/vector/vector.go",
+      "line": 92,
+      "signature": "func bumpHash(vec []float32, key string, delta float32) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "tokenize",
+      "params": "s string",
+      "returns": "[]string {",
+      "file": "pkg/vector/vector.go",
+      "line": 104,
+      "signature": "func tokenize(s string) []string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "NewOllamaEmbedder",
+      "params": "",
+      "returns": "*OllamaEmbedder {",
+      "file": "pkg/vector/vector.go",
+      "line": 135,
+      "signature": "func NewOllamaEmbedder() *OllamaEmbedder {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Dim",
+      "params": "",
+      "returns": "int     { return e.dim }",
+      "file": "pkg/vector/vector.go",
+      "line": 152,
+      "signature": "func (e *OllamaEmbedder) Dim() int     { return e.dim }",
+      "language_hint": "go"
+    },
+    {
+      "name": "Name",
+      "params": "",
+      "returns": "string { return \"ollama:\" + e.model }",
+      "file": "pkg/vector/vector.go",
+      "line": 153,
+      "signature": "func (e *OllamaEmbedder) Name() string { return \"ollama:\" + e.model }",
+      "language_hint": "go"
+    },
+    {
+      "name": "Embed",
+      "params": "ctx context.Context, text string",
+      "returns": "([]float32, error) {",
+      "file": "pkg/vector/vector.go",
+      "line": 155,
+      "signature": "func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "SelectEmbedder",
+      "params": "",
+      "returns": "Embedder {",
+      "file": "pkg/vector/vector.go",
+      "line": 185,
+      "signature": "func SelectEmbedder() Embedder {",
+      "language_hint": "go"
+    },
+    {
+      "name": "New",
+      "params": "persistDir string",
+      "returns": "(*Store, error) {",
+      "file": "pkg/vector/vector.go",
+      "line": 208,
+      "signature": "func New(persistDir string) (*Store, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "EmbedderName",
+      "params": "",
+      "returns": "string { return s.embedder.Name() }",
+      "file": "pkg/vector/vector.go",
+      "line": 228,
+      "signature": "func (s *Store) EmbedderName() string { return s.embedder.Name() }",
+      "language_hint": "go"
+    },
+    {
+      "name": "Upsert",
+      "params": "ctx context.Context, id, content string, metadata map[string]string",
+      "returns": "error {",
+      "file": "pkg/vector/vector.go",
+      "line": 233,
+      "signature": "func (s *Store) Upsert(ctx context.Context, id, content string, metadata map[string]string) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Delete",
+      "params": "ctx context.Context, id string",
+      "returns": "error {",
+      "file": "pkg/vector/vector.go",
+      "line": 249,
+      "signature": "func (s *Store) Delete(ctx context.Context, id string) error {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Query",
+      "params": "ctx context.Context, text string, k int, where map[string]string",
+      "returns": "([]QueryResult, error) {",
+      "file": "pkg/vector/vector.go",
+      "line": 265,
+      "signature": "func (s *Store) Query(ctx context.Context, text string, k int, where map[string]string) ([]QueryResult, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Count",
+      "params": "",
+      "returns": "int {",
+      "file": "pkg/vector/vector.go",
+      "line": 296,
+      "signature": "func (s *Store) Count() int {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestHashingEmbedderDeterministic",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/vector/vector_test.go",
+      "line": 10,
+      "signature": "func TestHashingEmbedderDeterministic(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestHashingEmbedderSimilarityRanking",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/vector/vector_test.go",
+      "line": 32,
+      "signature": "func TestHashingEmbedderSimilarityRanking(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "cosine",
+      "params": "a, b []float32",
+      "returns": "float64 {",
+      "file": "pkg/vector/vector_test.go",
+      "line": 46,
+      "signature": "func cosine(a, b []float32) float64 {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestStoreUpsertQueryRoundtrip",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/vector/vector_test.go",
+      "line": 55,
+      "signature": "func TestStoreUpsertQueryRoundtrip(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestStoreQueryRespectsWhereFilter",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/vector/vector_test.go",
+      "line": 92,
+      "signature": "func TestStoreQueryRespectsWhereFilter(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestResolveFindsKeywordWindow",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/resolver/resolver_test.go",
+      "line": 13,
+      "signature": "func TestResolveFindsKeywordWindow(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestResolveNoMatchReturnsEmptyEvidence",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/resolver/resolver_test.go",
+      "line": 58,
+      "signature": "func TestResolveNoMatchReturnsEmptyEvidence(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "TestResolveRejectsMissingArtifact",
+      "params": "t *testing.T",
+      "returns": "{",
+      "file": "pkg/resolver/resolver_test.go",
+      "line": 79,
+      "signature": "func TestResolveRejectsMissingArtifact(t *testing.T) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "New",
+      "params": "arts *artifact.Store",
+      "returns": "*Resolver {",
+      "file": "pkg/resolver/resolver.go",
+      "line": 58,
+      "signature": "func New(arts *artifact.Store) *Resolver {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Resolve",
+      "params": "_ context.Context, req Request",
+      "returns": "(*Result, error) {",
+      "file": "pkg/resolver/resolver.go",
+      "line": 70,
+      "signature": "func (r *Resolver) Resolve(_ context.Context, req Request) (*Result, error) {",
+      "language_hint": "go"
+    },
+    {
+      "name": "Async",
+      "params": "ctx context.Context, req Request",
+      "returns": "<-chan *Result {",
+      "file": "pkg/resolver/resolver.go",
+      "line": 212,
+      "signature": "func (r *Resolver) Async(ctx context.Context, req Request) <-chan *Result {",
+      "language_hint": "go"
+    },
+    {
+      "name": "mergeWindows",
+      "params": "in []resolveWindow",
+      "returns": "[]resolveWindow {",
+      "file": "pkg/resolver/resolver.go",
+      "line": 231,
+      "signature": "func mergeWindows(in []resolveWindow) []resolveWindow {",
+      "language_hint": "go"
+    },
+    {
+      "name": "tokenize",
+      "params": "s string",
+      "returns": "[]string {",
+      "file": "pkg/resolver/resolver.go",
+      "line": 253,
+      "signature": "func tokenize(s string) []string {",
+      "language_hint": "go"
+    },
+    {
+      "name": "uniq",
+      "params": "in []string",
+      "returns": "[]string {",
+      "file": "pkg/resolver/resolver.go",
+      "line": 273,
+      "signature": "func uniq(in []string) []string {",
       "language_hint": "go"
     },
     {
@@ -1596,20 +2721,11 @@
       "language_hint": "go"
     },
     {
-      "name": "TestAppendSiblingAfterLoopChild",
-      "params": "t *testing.T",
-      "returns": "{",
-      "file": "pkg/tasknode/tasknode_new_test.go",
-      "line": 40,
-      "signature": "func TestAppendSiblingAfterLoopChild(t *testing.T) {",
-      "language_hint": "go"
-    },
-    {
       "name": "TestAppendSiblingAfterLast",
       "params": "t *testing.T",
       "returns": "{",
       "file": "pkg/tasknode/tasknode_new_test.go",
-      "line": 54,
+      "line": 40,
       "signature": "func TestAppendSiblingAfterLast(t *testing.T) {",
       "language_hint": "go"
     },
@@ -1618,7 +2734,7 @@
       "params": "t *testing.T",
       "returns": "{",
       "file": "pkg/tasknode/tasknode_new_test.go",
-      "line": 75,
+      "line": 61,
       "signature": "func TestWaitingHumanStatus(t *testing.T) {",
       "language_hint": "go"
     },
@@ -1627,7 +2743,7 @@
       "params": "t *testing.T",
       "returns": "{",
       "file": "pkg/tasknode/tasknode_new_test.go",
-      "line": 83,
+      "line": 69,
       "signature": "func TestStructuredHandoffFields(t *testing.T) {",
       "language_hint": "go"
     },
@@ -1636,7 +2752,7 @@
       "params": "id, name string, typ TaskType, info []string",
       "returns": "*TaskNode {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 88,
+      "line": 126,
       "signature": "func NewTaskNode(id, name string, typ TaskType, info []string) *TaskNode {",
       "language_hint": "go"
     },
@@ -1645,7 +2761,7 @@
       "params": "child *TaskNode",
       "returns": "{",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 110,
+      "line": 148,
       "signature": "func (t *TaskNode) AddChild(child *TaskNode) {",
       "language_hint": "go"
     },
@@ -1654,7 +2770,7 @@
       "params": "childID string",
       "returns": "error {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 119,
+      "line": 157,
       "signature": "func (t *TaskNode) RemoveChild(childID string) error {",
       "language_hint": "go"
     },
@@ -1663,7 +2779,7 @@
       "params": "status TaskStatus",
       "returns": "{",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 133,
+      "line": 171,
       "signature": "func (t *TaskNode) SetStatus(status TaskStatus) {",
       "language_hint": "go"
     },
@@ -1672,7 +2788,7 @@
       "params": "",
       "returns": "bool {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 141,
+      "line": 179,
       "signature": "func (t *TaskNode) IsCompleted() bool {",
       "language_hint": "go"
     },
@@ -1681,7 +2797,7 @@
       "params": "fn func(node *TaskNode",
       "returns": ") {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 147,
+      "line": 185,
       "signature": "func (t *TaskNode) Traverse(fn func(node *TaskNode)) {",
       "language_hint": "go"
     },
@@ -1690,7 +2806,7 @@
       "params": "",
       "returns": "{",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 162,
+      "line": 200,
       "signature": "func (t *TaskNode) MarkTraveled() {",
       "language_hint": "go"
     },
@@ -1699,8 +2815,26 @@
       "params": "",
       "returns": "{",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 170,
+      "line": 208,
       "signature": "func (t *TaskNode) MarkFinished() {",
+      "language_hint": "go"
+    },
+    {
+      "name": "IsTerminal",
+      "params": "",
+      "returns": "bool {",
+      "file": "pkg/tasknode/tasknode.go",
+      "line": 217,
+      "signature": "func (t *TaskNode) IsTerminal() bool {",
+      "language_hint": "go"
+    },
+    {
+      "name": "IsSuccessful",
+      "params": "",
+      "returns": "bool {",
+      "file": "pkg/tasknode/tasknode.go",
+      "line": 224,
+      "signature": "func (t *TaskNode) IsSuccessful() bool {",
       "language_hint": "go"
     },
     {
@@ -1708,7 +2842,7 @@
       "params": "",
       "returns": "bool {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 179,
+      "line": 231,
       "signature": "func (t *TaskNode) AllChildrenTraveled() bool {",
       "language_hint": "go"
     },
@@ -1717,7 +2851,7 @@
       "params": "",
       "returns": "bool {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 191,
+      "line": 243,
       "signature": "func (t *TaskNode) AllChildrenFinished() bool {",
       "language_hint": "go"
     },
@@ -1726,7 +2860,7 @@
       "params": "",
       "returns": "*TaskNode {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 203,
+      "line": 255,
       "signature": "func (t *TaskNode) GetNextUntraveledChild() *TaskNode {",
       "language_hint": "go"
     },
@@ -1735,7 +2869,7 @@
       "params": "",
       "returns": "{",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 215,
+      "line": 267,
       "signature": "func (t *TaskNode) ResetChildrenStatus() {",
       "language_hint": "go"
     },
@@ -1744,7 +2878,7 @@
       "params": "",
       "returns": "{",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 227,
+      "line": 279,
       "signature": "func (t *TaskNode) RestoreParents() {",
       "language_hint": "go"
     },
@@ -1753,7 +2887,7 @@
       "params": "sibling *TaskNode",
       "returns": "error {",
       "file": "pkg/tasknode/tasknode.go",
-      "line": 239,
+      "line": 290,
       "signature": "func (t *TaskNode) AppendSiblingAfter(sibling *TaskNode) error {",
       "language_hint": "go"
     }

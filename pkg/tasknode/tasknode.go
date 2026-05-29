@@ -88,8 +88,7 @@ type TaskNode struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	WetherTraveled bool // 是否已遍历过
-	WetherFinished bool // 是否已完成
-	SingleFinished bool // Agentic Loop: LLM explicitly called mark_complete
+	WetherFinished bool // 是否已完成（Status==Completed 时由 MarkFinished 设置）
 	Variables      map[string]interface{}
 	Index          int    // 节点全局索引
 	Result         string // 节点执行结果摘要
@@ -212,6 +211,20 @@ func (t *TaskNode) MarkFinished() {
 	t.WetherFinished = true
 	t.Status = Completed
 	t.UpdatedAt = time.Now()
+}
+
+// IsTerminal 节点是否已终止（完成或失败，不再需要 LLM 调用）。
+func (t *TaskNode) IsTerminal() bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.WetherFinished || t.Status == Failed
+}
+
+// IsSuccessful 节点是否成功完成（terminal 且 Completed）。
+func (t *TaskNode) IsSuccessful() bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.WetherFinished && t.Status == Completed
 }
 
 // AllChildrenTraveled 检查所有子节点是否都已遍历
