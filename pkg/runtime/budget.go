@@ -59,8 +59,3 @@ func newBudgetConfig() BudgetConfig {
 		MaxCommandResultChars:       cmdChars,
 	}
 }
-
-// loadContextBudget 兼容老调用点，仅返回总 token 预算。
-func loadContextBudget() int {
-	return envInt(DefaultContextBudget, "LLMVM_CONTEXT_TOKEN_LIMIT", "CONTEXT_BUDGET")
-}

@@ -125,20 +125,6 @@ func (r *Runtime) formatTreeIndexLine(node *tasknode.TaskNode, indent int) strin
 	return line + "\n"
 }
 
-// collectSiblingHandoffs 收集已完成兄弟节点的 handoff（向后兼容，activation.go 中有更丰富的版本）
-func (r *Runtime) collectSiblingHandoffs(current *tasknode.TaskNode) string {
-	if current.Parent == nil {
-		return ""
-	}
-	var sb strings.Builder
-	for _, sibling := range current.Parent.Children {
-		if sibling.ID != current.ID && sibling.WetherFinished && sibling.Handoff != "" {
-			sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", sibling.ID, sibling.Name, sibling.Handoff))
-		}
-	}
-	return sb.String()
-}
-
 // === Global Workspace（向后兼容，selectAttentionNodes 已废弃） ===
 
 // NodeResult 辅助结构用于排序
@@ -148,11 +134,6 @@ type NodeResult struct {
 	Result      string
 	Variables   map[string]interface{}
 	IsImportant bool
-}
-
-// selectAttentionNodes 已废弃，保留空实现以防外部调用
-func (r *Runtime) selectAttentionNodes(current *tasknode.TaskNode, request string) ([]string, error) {
-	return nil, nil
 }
 
 // FormatGlobalWorkspace 根据选中的 ID 组合详细的 RAM 快照

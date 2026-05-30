@@ -153,7 +153,7 @@ func (r *Runtime) artifactGetterLoop(
 
 		default:
 			fmt.Printf("  ⚠️  ArtifactGetter unknown tool %q, stopping\n", tool.Tool)
-			break
+
 		}
 	}
 
@@ -182,7 +182,8 @@ func buildGetterPrompt(
 	}
 
 	sb.WriteString("\n## Goal\n")
-	sb.WriteString(goal + "\n")
+	sb.WriteString(goal)
+	sb.WriteString("\n")
 
 	if len(acCriteria) > 0 {
 		sb.WriteString("\n## Acceptance Criteria\n")

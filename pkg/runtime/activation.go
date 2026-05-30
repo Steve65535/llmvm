@@ -242,7 +242,8 @@ func (r *Runtime) formatActivationContext(act NodeActivation, current *tasknode.
 	// 2. 父节点目标
 	if act.ParentGoal != "" {
 		sb.WriteString("\n## Parent Goal\n")
-		sb.WriteString(act.ParentGoal + "\n")
+		sb.WriteString(act.ParentGoal)
+		sb.WriteString("\n")
 	}
 
 	// 3. 兄弟 handoff
@@ -336,11 +337,12 @@ func firstInfo(info []string) string {
 // ContextPack 是节点激活后的最终上下文打包结果。
 //
 // 流程（按文档 2）：
-//   BuildPosition(node)
-//     -> buildNodeActivation(node)        （deterministic 字段：祖先链、handoff、artifact 索引）
-//     -> retrievalSvc.Query(...)          （混合检索 + rerank，Leaf 节点必走）
-//     -> resolver.Resolve(...) for big artifacts
-//     -> AssembleContextPack
+//
+//	BuildPosition(node)
+//	  -> buildNodeActivation(node)        （deterministic 字段：祖先链、handoff、artifact 索引）
+//	  -> retrievalSvc.Query(...)          （混合检索 + rerank，Leaf 节点必走）
+//	  -> resolver.Resolve(...) for big artifacts
+//	  -> AssembleContextPack
 //
 // ContextPack 不替代 NodeActivation，它在 Activation 之上加了一层"按 position 决定收什么"。
 type ContextPack struct {

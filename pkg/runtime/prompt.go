@@ -9,20 +9,9 @@ import (
 	"github.com/Steve65535/llmvm/pkg/tasknode"
 )
 
-// buildPrompt 构建 stateless prompt（不包含历史上下文）。
-func (r *Runtime) buildPrompt(current *tasknode.TaskNode, request string, retryError error) (string, error) {
-	return r.buildPromptInternalV2(current, request, "", retryError)
-}
-
 // buildPromptWithGlobalContext 使用 Runtime 自动组装的全局上下文。
 func (r *Runtime) buildPromptWithGlobalContext(current *tasknode.TaskNode, request string, globalContext string, retryError error) (string, error) {
 	return r.buildPromptInternalV2(current, request, globalContext, retryError)
-}
-
-// buildPromptWithWorkspace 向后兼容（旧接口，使用显式选定的节点 ID 集合作为 workspace）。
-func (r *Runtime) buildPromptWithWorkspace(current *tasknode.TaskNode, request string, selectedNodeIDs []string, retryError error) (string, error) {
-	workspaceStr := r.FormatGlobalWorkspace(selectedNodeIDs)
-	return r.buildPromptInternalV2(current, request, workspaceStr, retryError)
 }
 
 // buildPromptInternalV2 是 prompt 拼装的核心。
